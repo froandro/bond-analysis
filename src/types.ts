@@ -1,8 +1,4 @@
-export interface MoexRow {
-  [key: string]: unknown;
-}
-
-export interface MoexTable<T = MoexRow> {
+export interface MoexTable {
   columns: string[];
   data: unknown[][];
 }

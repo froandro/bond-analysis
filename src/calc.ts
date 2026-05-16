@@ -1,10 +1,10 @@
-import type { BondData, CalcParams, Results } from './types';
-import { getDaysBetween, calculateYTM, isFloatingCoupon } from './utils';
+import type { BondData, CalcParams, Results, CalcEvent } from './types';
+import { getDaysBetween, calculateYTM, isFloatingCoupon, DAYS_IN_YEAR } from './utils';
 
 export function extractBondParams(bond: BondData) {
   const nom = Number(Number(bond.FACEVALUE || bond.NOMINAL || bond.INITIALFACEVALUE || 1000).toFixed(2));
   const priceVal = Number(Number(bond.LAST || bond.WAPRICE || bond.LCURRENTPRICE || bond.LCLOSEPRICE || bond.PREVPRICE || 100).toFixed(2));
-  const frequency = Math.round(365.25 / (Number(bond.COUPONPERIOD) || 91)) || 4;
+  const frequency = Math.round(DAYS_IN_YEAR / (Number(bond.COUPONPERIOD) || 91)) || 4;
   let couponVal = Number(bond.COUPONPERCENT || 0);
   const couponValueAbs = Number(bond.COUPONVALUE || 0);
   if (couponVal === 0 && couponValueAbs > 0 && nom > 0) {
@@ -52,11 +52,11 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   const remainderVal = Math.max(0, investment - totalCostWithComm);
 
   const couponFreqVal = Math.max(1, couponFrequency);
-  const couponPeriodDays = Math.round(365.25 / couponFreqVal);
+  const couponPeriodDays = Math.round(365 / couponFreqVal);
 
   const isFloater = bond ? isFloatingCoupon(bond.BONDTYPE, bond.BONDSUBTYPE, bond.COUPONTYPE, bond.SHORTNAME, bond.coupons) : false;
 
-  const events: { date: Date; type: string; value: number }[] = [];
+  const events: CalcEvent[] = [];
 
   const amortSchedule: { date: Date; value: number }[] = [];
   if (bond?.amortizations && bond.amortizations.length > 0) {
@@ -88,7 +88,7 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
       currentNext.setDate(currentNext.getDate() + couponPeriodDays);
       let safety = 0;
       while (currentNext <= maturity && safety < 100) {
-        const paidAmort = amortSchedule.filter(a => a.date < currentNext).reduce((sum, a) => sum + a.value, 0);
+        const paidAmort = amortSchedule.filter(a => a.date <= currentNext).reduce((sum, a) => sum + a.value, 0);
         const nominalAtDate = Math.max(0, nominal - paidAmort);
         const cVal = isFloater && lastCouponValue > 0 ? lastCouponValue : nominalAtDate * (couponRate / 100) / couponFreqVal;
         events.push({ date: new Date(currentNext), type: 'coupon', value: cVal });
@@ -121,9 +121,9 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   const couponCountVal = events.filter(e => e.type === 'coupon').length;
   let totalNetCoupons = 0;
 
-  const cashFlows: number[] = [-totalCostOne];
+  const cashFlows: number[] = [-dirtyPriceOne];
   const cfDates: Date[] = [purchase];
-  const netCashFlows: number[] = [-totalCostOne];
+  const netCashFlows: number[] = [-dirtyPriceOne];
 
   let currentNominal = nominal;
   let ytmCumulativeAccum = 0;
@@ -239,7 +239,7 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   const finalAmountVal = (nominal * bondCountVal) + totalNetCoupons;
   const netProfitVal = finalAmountVal - totalCostWithComm;
 
-  const firstCoupon = events.find(e => e.type === 'coupon')?.value || (nominal * (couponRate / 100) / couponFreqVal);
+  const firstCoupon = events.find(e => e.type === 'coupon')?.value ?? (nominal * (couponRate / 100) / couponFreqVal);
   const netCouponPerPeriod = firstCoupon * (1 - (taxRate / 100));
   const annualNetCoupon = netCouponPerPeriod * couponFreqVal * bondCountVal;
   const paybackMonthsVal = !paybackDateVal ? -1 : (totalOverpaymentVal <= 0 ? 0 : (annualNetCoupon > 0 ? (totalOverpaymentVal / (annualNetCoupon / 12)) : 0));

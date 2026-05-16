@@ -22,7 +22,7 @@ export const TOOLTIPS = {
   netProfit: "Купоны + номинал − все расходы"
 };
 
-export const DAYS_IN_YEAR = 365.25;
+export const DAYS_IN_YEAR = 365;
 export const CBR_URL = "https://www.cbr-xml-daily.ru/daily_json.js";
 
 let _cachedRates: Record<string, number> | null = null;

@@ -1,44 +1,30 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { 
-  Search, 
-  Download, 
-  RotateCcw, 
-  TrendingUp, 
-  Calendar, 
-  Percent, 
-  Wallet,
-  ArrowRight,
+import {
+  Search,
+  Download,
+  RotateCcw,
   Info,
-  ChevronRight,
   Calculator,
   BarChart3,
-  CreditCard,
   Sun,
   Moon
 } from 'lucide-react';
-import { 
-  LineChart, 
-  Line, 
-  BarChart,
+import {
   Bar,
   ComposedChart,
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip as RechartsTooltip, 
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
   ResponsiveContainer,
-  AreaChart,
-  Area,
-  Legend,
   ReferenceLine,
-  ReferenceDot,
-  Scatter
+  Area
 } from 'recharts';
 
 import type { BondData, Results, MoexCoupon, CalcParams, ComparisonEntry } from './types';
 import {
-  cn, TOOLTIPS, getDaysBetween, normalizeCurrency, getCurrencySymbol, clamp,
-  isFloatingCoupon, getBondTypeLabel, calculateYTM, fetchExchangeRates,
+  TOOLTIPS, normalizeCurrency, getCurrencySymbol, clamp,
+  isFloatingCoupon, getBondTypeLabel,
   getDefaultInvestment, convertInvestment
 } from './utils';
 import {
@@ -82,7 +68,7 @@ export default function App() {
     document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
 
-  const [bondTypeCache, setBondTypeCache] = useState<Record<string, { type: string; couponPercent: number }>>({});
+  const bondTypeCacheRef = useRef<Map<string, { type: string; couponPercent: number }>>(new Map());
   const [comparisonList, setComparisonList] = useState<ComparisonEntry[]>([]);
 
   const addToComparison = useCallback(() => {
@@ -121,17 +107,17 @@ export default function App() {
     }
   }, []);
 
-  const selectBond = useCallback(async (bond: any) => {
+  const selectBond = useCallback(async (bond: Record<string, unknown>) => {
     setShowComparison(false);
     setIsLoading(true);
-    setBondSearch(bond.isin || bond.secid || bond.shortname);
+    setBondSearch(String(bond.isin || bond.secid || bond.shortname || ''));
     setSearchResults([]);
 
     try {
-      const secId = bond.secid || bond.SECID;
+      const secId = String(bond.secid || bond.SECID || '');
 
       const boardsList = await fetchBondBoards(secId);
-      let targetBoard = bond.primary_boardid || bond.BOARDID;
+      let targetBoard = String(bond.primary_boardid || bond.BOARDID || '');
       const preferred = MOEX_BOARDS.find(b => boardsList.includes(b));
       if (preferred) targetBoard = preferred;
       else if (boardsList.length > 0) targetBoard = boardsList[0];
@@ -161,17 +147,19 @@ export default function App() {
       setSelectedBond(fullBond);
 
       const bondKey = secId.toUpperCase();
-      setBondTypeCache(prev => ({
-        ...prev,
-        [bondKey]: {
-          type: getBondTypeLabel(fullBond.BONDTYPE, fullBond.BONDSUBTYPE) || '',
-          couponPercent: Number(fullBond.COUPONPERCENT || 0)
-        }
-      }));
+      const cache = bondTypeCacheRef.current;
+      cache.set(bondKey, {
+        type: getBondTypeLabel(fullBond.BONDTYPE, fullBond.BONDSUBTYPE) || '',
+        couponPercent: Number(fullBond.COUPONPERCENT || 0)
+      });
+      if (cache.size > 50) {
+        const firstKey = cache.keys().next().value;
+        if (firstKey) cache.delete(firstKey);
+      }
 
       const nom = Number(Number(fullBond.FACEVALUE || fullBond.NOMINAL || fullBond.INITIALFACEVALUE || 1000).toFixed(2));
       const priceVal = Number(Number(marketData.LAST || marketData.WAPRICE || marketData.LCURRENTPRICE || marketData.LCLOSEPRICE || fullBond.PREVPRICE || 100).toFixed(2));
-      const frequency = Math.round(365.25 / (Number(fullBond.COUPONPERIOD) || 91)) || 4;
+      const frequency = Math.round(365 / (Number(fullBond.COUPONPERIOD) || 91)) || 4;
 
       let couponVal = Number(fullBond.COUPONPERCENT || 0);
       const couponValueAbs = Number(fullBond.COUPONVALUE || 0);
@@ -204,6 +192,11 @@ export default function App() {
       }
       setCurrency(newCurrency);
 
+      const secIdUpper = (secId || '').toUpperCase();
+      if (secIdUpper.startsWith('SU') || fullBond.BONDSUBTYPE === 'GOVERNMENT') {
+        setTaxRate(prev => prev !== 0 ? 0 : prev);
+      }
+
     } catch (e) {
       console.error('Selection error:', e);
       alert('\u0414\u0430\u043D\u043D\u044B\u0435 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u044B \u0438\u043B\u0438 \u043E\u0431\u043B\u0438\u0433\u0430\u0446\u0438\u044F \u043D\u0435 \u0442\u043E\u0440\u0433\u0443\u0435\u0442\u0441\u044F.');
@@ -225,15 +218,11 @@ export default function App() {
   );
 
   const resultsRef = useRef<HTMLDivElement>(null);
-  const [, setPdfGenerating] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const exportPDF = useCallback(async () => {
     if (!results) return;
-    setPdfGenerating(true);
-    setTimeout(() => {
-      window.print();
-      setTimeout(() => setPdfGenerating(false), 500);
-    }, 100);
+    window.print();
   }, [results]);
 
   return (
@@ -292,7 +281,11 @@ export default function App() {
                 <input 
                   type="text" 
                   value={bondSearch}
-                  onChange={(e) => { setBondSearch(e.target.value); handleSearch(e.target.value); }}
+                  onChange={(e) => {
+                    setBondSearch(e.target.value);
+                    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+                    searchTimerRef.current = setTimeout(() => handleSearch(e.target.value), 350);
+                  }}
                   placeholder="Тикер, ISIN или название..."
                   className="w-full border rounded-xl px-4 py-3.5 text-sm font-bold outline-none transition-all shadow-inner"
                   style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
@@ -316,7 +309,7 @@ export default function App() {
                             <span className="text-[8px] px-1.5 py-0.5 rounded font-bold uppercase" style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent)' }}>{bond.primary_boardid || bond.BOARDID}</span>
                             {(() => {
                               const key = (bond.secid || bond.SECID || '').toUpperCase();
-                              const cached = bondTypeCache[key];
+                              const cached = bondTypeCacheRef.current.get(key);
                               if (cached) {
                                 if (cached.type) {
                                   return (
@@ -469,12 +462,12 @@ export default function App() {
                   </thead>
                   <tbody className="divide-y" style={{ borderColor: 'var(--border-color)' }}>
                     {[
-                      { label: 'Тип', render: (_: any, ci: number) => getBondTypeLabel(comparisonList[ci].bond.BONDTYPE, comparisonList[ci].bond.BONDSUBTYPE) || '\u2014' },
-                      { label: 'ISIN', render: (_: any, ci: number) => comparisonList[ci].bond.ISIN || '\u2014' },
-                      { label: '\u0426\u0435\u043D\u0430, %', render: (_: any, ci: number) => comparisonList[ci].params.pricePercent.toFixed(2) },
+                      { label: 'Тип', render: (_: Results | null, ci: number) => getBondTypeLabel(comparisonList[ci].bond.BONDTYPE, comparisonList[ci].bond.BONDSUBTYPE) || '\u2014' },
+                      { label: 'ISIN', render: (_: Results | null, ci: number) => comparisonList[ci].bond.ISIN || '\u2014' },
+                      { label: '\u0426\u0435\u043D\u0430, %', render: (_: Results | null, ci: number) => comparisonList[ci].params.pricePercent.toFixed(2) },
                       { label: '\u041D\u041A\u0414', render: (r: Results | null) => r ? `${r.cleanPrice.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '\u2014' },
-                      { label: '\u041A\u0443\u043F\u043E\u043D, %', render: (_: any, ci: number) => `${comparisonList[ci].params.couponRate.toFixed(2)}%` },
-                      { label: '\u0412\u044B\u043F\u043B\u0430\u0442\u0430', render: (_: any, ci: number) => `${comparisonList[ci].params.couponFrequency} \u0440\u0430\u0437/\u0433\u043E\u0434` },
+                      { label: '\u041A\u0443\u043F\u043E\u043D, %', render: (_: Results | null, ci: number) => `${comparisonList[ci].params.couponRate.toFixed(2)}%` },
+                      { label: '\u0412\u044B\u043F\u043B\u0430\u0442\u0430', render: (_: Results | null, ci: number) => `${comparisonList[ci].params.couponFrequency} \u0440\u0430\u0437/\u0433\u043E\u0434` },
                       { label: '\u0414\u043D\u0435\u0439 \u0434\u043E \u043F\u043E\u0433\u0430\u0448.', render: (r: Results | null) => r ? `${r.daysToMaturity}` : '\u2014' },
                       { label: '\u041A\u043E\u043B-\u0432\u043E', render: (r: Results | null) => r ? `${r.bondCount} \u0448\u0442.` : '\u2014' },
                       { label: '\u0422\u0435\u043A. \u0434\u043E\u0445\u043E\u0434\u043D\u043E\u0441\u0442\u044C', render: (r: Results | null) => r ? `${r.currentYield.toFixed(2)}%` : '\u2014' },
@@ -1074,17 +1067,17 @@ export default function App() {
                     </thead>
                     <tbody>
                       {[
-                        { label: 'Тип', render: (_: any, ci: number) => getBondTypeLabel(comparisonList[ci].bond.BONDTYPE, comparisonList[ci].bond.BONDSUBTYPE) || '—' },
-                        { label: 'Цена, %', render: (_: any, ci: number) => comparisonList[ci].params.pricePercent.toFixed(2) },
-                        { label: 'Купон, %', render: (_: any, ci: number) => `${comparisonList[ci].params.couponRate.toFixed(2)}%` },
-                        { label: 'Выплат/год', render: (_: any, ci: number) => `${comparisonList[ci].params.couponFrequency}` },
-                        { label: 'Дней до погаш.', render: (r: any) => r ? `${r.daysToMaturity}` : '—' },
-                        { label: 'Тек. доходность', render: (r: any) => r ? `${r.currentYield.toFixed(2)}%` : '—' },
-                        { label: 'YTM', render: (r: any) => r ? `${r.isFloatingCoupon ? '~' : ''}${r.ytm.toFixed(2)}%` : '—' },
-                        { label: 'NET доходность', render: (r: any) => r ? `${r.netYield.toFixed(2)}%` : '—' },
-                        { label: 'Окупаемость', render: (r: any) => r ? (r.paybackMonths < 0 ? 'Не окупается' : r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`) : '—' },
-                        { label: 'Кол-во', render: (r: any) => r ? `${r.bondCount} шт.` : '—' },
-                        { label: 'Чистая прибыль', render: (r: any) => r ? `${r.netProfit >= 0 ? '+' : ''}${r.netProfit.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '—' },
+                        { label: 'Тип', render: (_: Results | null, ci: number) => getBondTypeLabel(comparisonList[ci].bond.BONDTYPE, comparisonList[ci].bond.BONDSUBTYPE) || '—' },
+                        { label: 'Цена, %', render: (_: Results | null, ci: number) => comparisonList[ci].params.pricePercent.toFixed(2) },
+                        { label: 'Купон, %', render: (_: Results | null, ci: number) => `${comparisonList[ci].params.couponRate.toFixed(2)}%` },
+                        { label: 'Выплат/год', render: (_: Results | null, ci: number) => `${comparisonList[ci].params.couponFrequency}` },
+                        { label: 'Дней до погаш.', render: (r: Results | null) => r ? `${r.daysToMaturity}` : '—' },
+                        { label: 'Тек. доходность', render: (r: Results | null) => r ? `${r.currentYield.toFixed(2)}%` : '—' },
+                        { label: 'YTM', render: (r: Results | null) => r ? `${r.isFloatingCoupon ? '~' : ''}${r.ytm.toFixed(2)}%` : '—' },
+                        { label: 'NET доходность', render: (r: Results | null) => r ? `${r.netYield.toFixed(2)}%` : '—' },
+                        { label: 'Окупаемость', render: (r: Results | null) => r ? (r.paybackMonths < 0 ? 'Не окупается' : r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`) : '—' },
+                        { label: 'Кол-во', render: (r: Results | null) => r ? `${r.bondCount} шт.` : '—' },
+                        { label: 'Чистая прибыль', render: (r: Results | null) => r ? `${r.netProfit >= 0 ? '+' : ''}${r.netProfit.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '—' },
                       ].map(row => (
                         <tr key={row.label} style={{ borderBottom: '1px solid #f0f0f0' }}>
                           <td style={{ padding: '8px 12px', fontWeight: 600, fontSize: 9, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{row.label}</td>
