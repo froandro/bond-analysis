@@ -46,8 +46,13 @@ export interface BondData {
   COUPONTYPE?: string;
   ACTUAL_PRICE?: number;
   PREVPRICE?: number;
+  LAST?: number;
+  WAPRICE?: number;
+  LCURRENTPRICE?: number;
+  LCLOSEPRICE?: number;
   amortizations?: MoexCoupon[];
   coupons?: MoexCoupon[];
+  [key: string]: unknown;
 }
 
 export interface MoexCoupon {
@@ -128,4 +133,24 @@ export interface CalcEvent {
 export interface AmortScheduleItem {
   date: Date;
   value: number;
+}
+
+export interface CalcParams {
+  investment: number;
+  nominal: number;
+  pricePercent: number;
+  nkd: number;
+  couponRate: number;
+  couponFrequency: number;
+  purchaseDate: string;
+  maturityDate: string;
+  taxRate: number;
+  commission: number;
+  nextCouponDate: string;
+}
+
+export interface ComparisonEntry {
+  id: string;
+  bond: BondData;
+  params: Pick<CalcParams, 'nominal' | 'pricePercent' | 'nkd' | 'couponRate' | 'couponFrequency' | 'maturityDate' | 'nextCouponDate'>;
 }

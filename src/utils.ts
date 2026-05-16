@@ -101,7 +101,7 @@ export function clamp(val: number, min: number, max: number): number {
 
 export function isFloatingCoupon(
   bondType?: string, bondSubType?: string, couponType?: string,
-  shortName?: string, coupons?: { value: number }[]
+  shortName?: string, coupons?: { value?: number }[]
 ): boolean {
   if (!bondType && !bondSubType && !couponType && !shortName) return false;
   const t = (bondType || bondSubType || couponType || '').toUpperCase();

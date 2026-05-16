@@ -35,7 +35,7 @@ import {
   Scatter
 } from 'recharts';
 
-import type { BondData, Results, MoexCoupon } from './types';
+import type { BondData, Results, MoexCoupon, CalcParams, ComparisonEntry } from './types';
 import {
   cn, TOOLTIPS, getDaysBetween, normalizeCurrency, getCurrencySymbol, clamp,
   isFloatingCoupon, getBondTypeLabel, calculateYTM, fetchExchangeRates,
@@ -44,6 +44,7 @@ import {
 import {
   MOEX_BOARDS, searchBonds, fetchBondBoards, fetchBondDetails, fetchBondization
 } from './api/moex';
+import { computeResults, extractBondParams } from './calc';
 
 function Tooltip({ children, text }: { children: React.ReactNode; text: string }) {
   return (
@@ -81,6 +82,19 @@ export default function App() {
   }, [isDark]);
 
   const [bondTypeCache, setBondTypeCache] = useState<Record<string, { type: string; couponPercent: number }>>({});
+  const [comparisonList, setComparisonList] = useState<ComparisonEntry[]>([]);
+
+  const addToComparison = useCallback(() => {
+    if (!selectedBond) return;
+    const id = selectedBond.SECID.toUpperCase();
+    if (comparisonList.some(e => e.id === id)) return;
+    const bp = extractBondParams(selectedBond);
+    setComparisonList(prev => [...prev, { id, bond: selectedBond, params: bp }]);
+  }, [selectedBond, comparisonList]);
+
+  const removeComparison = useCallback((id: string) => {
+    setComparisonList(prev => prev.filter(e => e.id !== id));
+  }, []);
 
   const handleSearch = useCallback(async (query: string) => {
     if (query.length < 3) {
@@ -196,269 +210,17 @@ export default function App() {
     }
   }, [currency, investment]);
 
-  const results: Results | null = useMemo(() => {
-    if (!maturityDate || isNaN(nominal) || isNaN(pricePercent) || nominal <= 0) return null;
+  const calcParams: CalcParams = { investment, nominal, pricePercent, nkd, couponRate, couponFrequency, purchaseDate, maturityDate, taxRate, commission, nextCouponDate };
 
-    const purchase = new Date(purchaseDate);
-    const maturity = new Date(maturityDate || selectedBond?.MATURITYDATE || '');
-    if (!maturityDate && !selectedBond?.MATURITYDATE) return null;
-    if (maturity <= purchase) return null;
+  const results: Results | null = useMemo(() =>
+    computeResults(selectedBond, calcParams),
+    [selectedBond, investment, nominal, pricePercent, nkd, couponRate, couponFrequency, purchaseDate, maturityDate, taxRate, commission, nextCouponDate]
+  );
 
-    const daysToMat = getDaysBetween(purchase, maturity);
-    const cleanPriceVal = nominal * (pricePercent / 100);
-    const dirtyPriceVal = cleanPriceVal + nkd;
-
-    const cleanPriceOne = nominal * (pricePercent / 100);
-    const dirtyPriceOne = cleanPriceOne + nkd;
-    const commOne = dirtyPriceOne * (commission / 100);
-    const totalCostOne = dirtyPriceOne + commOne;
-
-    let bondCountVal = Math.floor(investment / (dirtyPriceVal * (1 + commission / 100)));
-    if (bondCountVal <= 0) return null;
-
-    const totalCostVal = bondCountVal * dirtyPriceVal;
-    const commissionVal = totalCostVal * (commission / 100);
-    const totalCostWithComm = totalCostVal + commissionVal;
-    const remainderVal = Math.max(0, investment - totalCostWithComm);
-
-    const couponFreqVal = Math.max(1, couponFrequency);
-    const couponPeriodDays = Math.round(365.25 / couponFreqVal);
-
-    const isFloater = selectedBond ? isFloatingCoupon(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE, selectedBond.COUPONTYPE, selectedBond.SHORTNAME, selectedBond.coupons) : false;
-
-    const events: { date: Date; type: string; value: number }[] = [];
-
-    const amortSchedule: { date: Date; value: number }[] = [];
-    if (selectedBond?.amortizations && selectedBond.amortizations.length > 0) {
-      selectedBond.amortizations.forEach(a => {
-        const d = new Date(String(a.amortdate));
-        if (d > purchase) {
-          amortSchedule.push({ date: d, value: Number(a.value) });
-          if (d < maturity) {
-            events.push({ date: d, type: 'amortization', value: Number(a.value) });
-          }
-        }
-      });
-    }
-    amortSchedule.sort((a, b) => a.date.getTime() - b.date.getTime());
-
-    if (selectedBond?.coupons && selectedBond.coupons.length > 0) {
-      selectedBond.coupons.forEach(c => {
-        const d = new Date(String(c.coupondate));
-        if (d > purchase && d <= maturity) {
-          events.push({ date: d, type: 'coupon', value: Number(c.value) });
-        }
-      });
-
-      const lastKnownCouponDate = new Date(Math.max(...selectedBond.coupons.map(c => new Date(String(c.coupondate)).getTime())));
-      if (lastKnownCouponDate < maturity) {
-        const knownCoupons = selectedBond.coupons.filter(c => Number(c.value) > 0);
-        const lastCouponValue = knownCoupons.length > 0 ? Number(knownCoupons[knownCoupons.length - 1].value) : 0;
-        let currentNext = new Date(lastKnownCouponDate);
-        currentNext.setDate(currentNext.getDate() + couponPeriodDays);
-        let safety = 0;
-        while (currentNext <= maturity && safety < 100) {
-          const paidAmort = amortSchedule.filter(a => a.date < currentNext).reduce((sum, a) => sum + a.value, 0);
-          const nominalAtDate = Math.max(0, nominal - paidAmort);
-          const couponVal = isFloater && lastCouponValue > 0 ? lastCouponValue : nominalAtDate * (couponRate / 100) / couponFreqVal;
-          events.push({ date: new Date(currentNext), type: 'coupon', value: couponVal });
-          currentNext.setDate(currentNext.getDate() + couponPeriodDays);
-          safety++;
-        }
-      }
-    } else {
-      let currentCoupon = nextCouponDate ? new Date(nextCouponDate) : new Date(purchase);
-      if (!nextCouponDate) currentCoupon.setDate(currentCoupon.getDate() + couponPeriodDays);
-
-      let s1 = 0;
-      while (currentCoupon <= purchase && s1 < 50) {
-        currentCoupon.setDate(currentCoupon.getDate() + couponPeriodDays);
-        s1++;
-      }
-
-      let safetyCounter = 0;
-      while (currentCoupon <= maturity && safetyCounter < 500) {
-        const paidAmort = amortSchedule.filter(a => a.date < currentCoupon).reduce((sum, a) => sum + a.value, 0);
-        const nominalAtDate = Math.max(0, nominal - paidAmort);
-        events.push({ date: new Date(currentCoupon), type: 'coupon', value: nominalAtDate * (couponRate / 100) / couponFreqVal });
-        currentCoupon.setDate(currentCoupon.getDate() + couponPeriodDays);
-        safetyCounter++;
-      }
-    }
-
-    events.sort((a, b) => a.date.getTime() - b.date.getTime());
-
-    const couponCountVal = events.filter(e => e.type === 'coupon').length;
-    let totalNetCoupons = 0;
-
-    const cashFlows: number[] = [-totalCostOne];
-    const cfDates: Date[] = [purchase];
-    const netCashFlows: number[] = [-totalCostOne];
-    const ytmChartData: Results['cashFlows'] = [{
-      date: purchase.toISOString().split('T')[0],
-      amount: 0,
-      cumulative: 0,
-      overpayment: dirtyPriceOne - nominal,
-      flow: -totalCostOne,
-      type: 'OPEN',
-      gross: 0,
-      tax: 0
-    }];
-
-    let currentNominal = nominal;
-    let ytmCumulativeAccum = 0;
-    let ytmNkdUsedForTax = nkd;
-    const ytmTotalOverpaymentVal = (dirtyPriceOne - nominal);
-    let ytmPaybackDate: string | null = ytmTotalOverpaymentVal <= 0 ? purchase.toISOString().split('T')[0] : null;
-
-    const portCashFlows: number[] = [-totalCostWithComm];
-    const portCfDates: Date[] = [purchase];
-    const netPortCashFlows: number[] = [-totalCostWithComm];
-    const portChartData: Results['cashFlows'] = [{
-      date: purchase.toISOString().split('T')[0],
-      amount: 0,
-      cumulative: 0,
-      overpayment: (dirtyPriceVal - nominal) * bondCountVal,
-      flow: -totalCostWithComm,
-      type: 'OPEN',
-      gross: 0,
-      tax: 0
-    }];
-    let cumulativeAccum = 0;
-    let totalTaxVal = 0;
-    let totalGrossCoupons = 0;
-    const totalOverpaymentVal = (dirtyPriceVal - nominal) * bondCountVal;
-    let paybackDateVal: string | null = totalOverpaymentVal <= 0 ? purchase.toISOString().split('T')[0] : null;
-
-    let nkdUsedForTax = nkd * bondCountVal;
-    events.forEach(event => {
-      if (event.type === 'coupon') {
-        const cVal = event.value;
-        const taxableAmount = Math.max(0, cVal - ytmNkdUsedForTax);
-        const taxVal = taxableAmount * (taxRate / 100);
-        ytmNkdUsedForTax = Math.max(0, ytmNkdUsedForTax - cVal);
-        const netCVal = cVal - taxVal;
-        ytmCumulativeAccum += netCVal;
-        cashFlows.push(cVal);
-        netCashFlows.push(netCVal);
-        cfDates.push(event.date);
-        ytmChartData.push({ date: event.date.toISOString().split('T')[0], amount: netCVal, cumulative: ytmCumulativeAccum, overpayment: ytmTotalOverpaymentVal, flow: netCVal, type: 'COUPON', gross: cVal, tax: taxVal });
-
-        const cValP = event.value * bondCountVal;
-        const taxableAmountP = Math.max(0, cValP - nkdUsedForTax);
-        const taxValP = taxableAmountP * (taxRate / 100);
-        nkdUsedForTax = Math.max(0, nkdUsedForTax - cValP);
-        const netCValP = cValP - taxValP;
-        totalNetCoupons += netCValP;
-        totalGrossCoupons += cValP;
-        totalTaxVal += taxValP;
-        cumulativeAccum += netCValP;
-        portCashFlows.push(cValP);
-        netPortCashFlows.push(netCValP);
-        portCfDates.push(event.date);
-        portChartData.push({ date: event.date.toISOString().split('T')[0], amount: netCValP, cumulative: cumulativeAccum, overpayment: totalOverpaymentVal, flow: netCValP, type: 'COUPON', gross: cValP, tax: taxValP });
-      } else if (event.type === 'amortization') {
-        const aVal = event.value;
-        currentNominal -= event.value;
-        ytmCumulativeAccum += aVal;
-        cashFlows.push(aVal);
-        netCashFlows.push(aVal);
-        cfDates.push(event.date);
-        ytmChartData.push({ date: event.date.toISOString().split('T')[0], amount: aVal, cumulative: ytmCumulativeAccum, overpayment: ytmTotalOverpaymentVal, flow: aVal, type: 'AMORTIZATION', gross: aVal, tax: 0 });
-
-        const aValP = event.value * bondCountVal;
-        cumulativeAccum += aValP;
-        portCashFlows.push(aValP);
-        netPortCashFlows.push(aValP);
-        portCfDates.push(event.date);
-        portChartData.push({ date: event.date.toISOString().split('T')[0], amount: aValP, cumulative: cumulativeAccum, overpayment: totalOverpaymentVal, flow: aValP, type: 'AMORTIZATION', gross: aValP, tax: 0 });
-      }
-
-      if (!ytmPaybackDate && ytmCumulativeAccum >= ytmTotalOverpaymentVal) {
-        ytmPaybackDate = event.date.toISOString().split('T')[0];
-      }
-      if (!paybackDateVal && cumulativeAccum >= totalOverpaymentVal) {
-        paybackDateVal = event.date.toISOString().split('T')[0];
-      }
-    });
-
-    const finalNominalPayout = currentNominal;
-    const finalNominalPayoutP = currentNominal * bondCountVal;
-    cashFlows.push(finalNominalPayout);
-    netCashFlows.push(finalNominalPayout);
-    cfDates.push(maturity);
-    ytmCumulativeAccum += finalNominalPayout;
-    ytmChartData.push({ date: maturity.toISOString().split('T')[0], amount: finalNominalPayout, cumulative: ytmCumulativeAccum, overpayment: ytmTotalOverpaymentVal, flow: finalNominalPayout, type: 'MATURITY', gross: finalNominalPayout, tax: 0 });
-
-    portCashFlows.push(finalNominalPayoutP);
-    netPortCashFlows.push(finalNominalPayoutP);
-    portCfDates.push(maturity);
-    cumulativeAccum += finalNominalPayoutP;
-
-    portChartData.push({
-      date: maturity.toISOString().split('T')[0],
-      amount: finalNominalPayoutP,
-      cumulative: cumulativeAccum,
-      overpayment: totalOverpaymentVal,
-      flow: finalNominalPayoutP,
-      type: 'MATURITY',
-      gross: finalNominalPayoutP,
-      tax: 0
-    });
-
-    if (!ytmPaybackDate && ytmCumulativeAccum >= ytmTotalOverpaymentVal) {
-      ytmPaybackDate = maturity.toISOString().split('T')[0];
-    }
-    if (!paybackDateVal && cumulativeAccum >= totalOverpaymentVal) {
-      paybackDateVal = maturity.toISOString().split('T')[0];
-    }
-
-    let ytmVal = calculateYTM(cashFlows, cfDates, purchase);
-    if (isNaN(ytmVal) || ytmVal < -99) ytmVal = 0;
-
-    let netYieldVal = calculateYTM(netCashFlows, cfDates, purchase);
-    if (isNaN(netYieldVal) || netYieldVal < -99) netYieldVal = 0;
-
-    const capitalGainVal = (nominal * bondCountVal) - (cleanPriceVal * bondCountVal);
-    const finalAmountVal = (nominal * bondCountVal) + totalNetCoupons;
-    const netProfitVal = finalAmountVal - totalCostWithComm;
-
-    const firstCoupon = events.find(e => e.type === 'coupon')?.value || (nominal * (couponRate / 100) / couponFreqVal);
-    const netCouponPerPeriod = firstCoupon * (1 - (taxRate / 100));
-    const annualNetCoupon = netCouponPerPeriod * couponFreqVal * bondCountVal;
-    const paybackMonthsVal = !paybackDateVal ? -1 : (totalOverpaymentVal <= 0 ? 0 : (annualNetCoupon > 0 ? (totalOverpaymentVal / (annualNetCoupon / 12)) : 0));
-
-    return {
-      cleanPrice: cleanPriceVal,
-      dirtyPrice: dirtyPriceVal,
-      bondCount: bondCountVal,
-      totalCost: totalCostVal,
-      remainder: remainderVal,
-      periodCoupon: firstCoupon,
-      netCoupon: firstCoupon * (1 - (taxRate / 100)),
-      annualCoupon: firstCoupon * couponFreqVal,
-      netAnnualTotal: annualNetCoupon,
-      totalOverpayment: totalOverpaymentVal,
-      currentYield: ((firstCoupon * couponFreqVal) / cleanPriceVal) * 100,
-      simpleYield: (firstCoupon * couponFreqVal / nominal) * 100,
-      ytm: ytmVal,
-      netYield: netYieldVal,
-      totalCouponToMaturity: totalNetCoupons,
-      finalAmount: finalAmountVal,
-      netProfit: netProfitVal,
-      commissionAmount: commissionVal,
-      totalTaxPaid: totalTaxVal,
-      daysToMaturity: daysToMat,
-      couponCount: couponCountVal,
-      paybackMonths: paybackMonthsVal,
-      paybackDate: paybackDateVal,
-      capitalGain: capitalGainVal,
-      grossCouponTotal: totalGrossCoupons,
-      isFloatingCoupon: isFloater,
-      knownCouponsOnly: false,
-      cashFlows: portChartData
-    };
-  }, [investment, nominal, pricePercent, nkd, couponRate, couponFrequency, purchaseDate, maturityDate, taxRate, commission, nextCouponDate, selectedBond, currency]);
+  const comparisonResults = useMemo(() =>
+    comparisonList.map(entry => computeResults(entry.bond, { ...calcParams, ...entry.params })),
+    [comparisonList, investment, taxRate, commission, purchaseDate]
+  );
 
   const resultsRef = useRef<HTMLDivElement>(null);
   const [, setPdfGenerating] = useState(false);
@@ -693,16 +455,22 @@ export default function App() {
                         {selectedBond && (
                           <div className="flex flex-col gap-2">
                             <div className="flex items-center gap-3">
-                               <span className="text-[10px] font-mono tracking-[0.5em] uppercase border-b pb-1" style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}>
-                                {selectedBond.SHORTNAME || selectedBond.SECNAME || selectedBond.SECID}
-                              </span>
-                              <span className="text-[10px] font-bold text-orange-500 border border-orange-500/30 rounded px-2 py-0.5">
-                                {getBondTypeLabel(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE) || '--'}
-                              </span>
-                              <span className="text-[10px] font-bold text-orange-500">
-                                {selectedBond.COUPONPERCENT ? `${Number(selectedBond.COUPONPERCENT).toFixed(2)}%` : '--'}
-                              </span>
-                            </div>
+                                <span className="text-[10px] font-mono tracking-[0.5em] uppercase border-b pb-1" style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}>
+                                 {selectedBond.SHORTNAME || selectedBond.SECNAME || selectedBond.SECID}
+                               </span>
+                               <span className="text-[10px] font-bold text-orange-500 border border-orange-500/30 rounded px-2 py-0.5">
+                                 {getBondTypeLabel(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE) || '--'}
+                               </span>
+                               <span className="text-[10px] font-bold text-orange-500">
+                                 {selectedBond.COUPONPERCENT ? `${Number(selectedBond.COUPONPERCENT).toFixed(2)}%` : '--'}
+                               </span>
+                               {!comparisonList.some(e => e.id === selectedBond.SECID.toUpperCase()) && (
+                                 <button onClick={addToComparison} className="text-[9px] font-bold uppercase tracking-widest px-2 py-1 rounded border transition-opacity hover:opacity-80"
+                                   style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+                                   + Сравнить
+                                 </button>
+                               )}
+                             </div>
                             {isFloatingCoupon(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE, selectedBond.COUPONTYPE, selectedBond.SHORTNAME, selectedBond.coupons) && (
                               <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-bold" style={{ backgroundColor: 'rgba(234,179,8,0.1)', color: '#eab308' }}>
                                 <Info size={12} />
@@ -1050,6 +818,66 @@ export default function App() {
                   </table>
                 </div>
               </div>
+
+              {comparisonList.length > 0 && comparisonResults.some(r => r !== null) && (
+                <div className="space-y-6">
+                  <div className="flex justify-between items-end px-2">
+                    <h2 className="text-[10px] font-mono tracking-[0.5em] uppercase" style={{ color: 'var(--text-secondary)' }}>Сравнение облигаций</h2>
+                    <span className="text-[9px] opacity-50 font-bold">{comparisonList.length} шт.</span>
+                  </div>
+                  <div className="overflow-x-auto rounded-3xl border shadow-2xl no-scrollbar" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+                    <table className="w-full text-[11px] font-mono text-left border-collapse">
+                      <thead>
+                        <tr className="border-b opacity-60" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+                          <th className="px-6 py-4 font-normal text-[10px]" style={{ color: 'var(--text-secondary)' }}>МЕТРИКА</th>
+                          {comparisonList.map((entry, ci) => {
+                            const res = comparisonResults[ci];
+                            if (!res) return null;
+                            return (
+                              <th key={entry.id} className="px-6 py-4 text-center" style={{ color: 'var(--text-secondary)' }}>
+                                <div className="flex flex-col items-center gap-1">
+                                  <span className="font-bold text-[11px]" style={{ color: 'var(--text-primary)' }}>{entry.bond.SHORTNAME || entry.bond.SECID}</span>
+                                  <span className="text-[8px] opacity-50">{entry.bond.ISIN}</span>
+                                  <button onClick={() => removeComparison(entry.id)}
+                                    className="text-[8px] uppercase tracking-wider opacity-40 hover:opacity-100 transition-opacity"
+                                    style={{ color: '#ef4444' }}>Удалить</button>
+                                </div>
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y" style={{ borderColor: 'var(--border-color)' }}>
+                        {[
+                          { label: 'Тип', render: (_: any, ci: number) => getBondTypeLabel(comparisonList[ci].bond.BONDTYPE, comparisonList[ci].bond.BONDSUBTYPE) || '—' },
+                          { label: 'ISIN', render: (_: any, ci: number) => comparisonList[ci].bond.ISIN || '—' },
+                          { label: 'Цена, %', render: (_: any, ci: number) => comparisonList[ci].params.pricePercent.toFixed(2) },
+                          { label: 'НКД', render: (r: Results | null) => r ? `${r.cleanPrice.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '—' },
+                          { label: 'Купон, %', render: (_: any, ci: number) => `${comparisonList[ci].params.couponRate.toFixed(2)}%` },
+                          { label: 'Выплата', render: (_: any, ci: number) => `${comparisonList[ci].params.couponFrequency} раз/год` },
+                          { label: 'Дней до погаш.', render: (r: Results | null) => r ? `${r.daysToMaturity}` : '—' },
+                          { label: 'Кол-во', render: (r: Results | null) => r ? `${r.bondCount} шт.` : '—' },
+                          { label: 'Тек. доходность', render: (r: Results | null) => r ? `${r.currentYield.toFixed(2)}%` : '—' },
+                          { label: 'YTM', render: (r: Results | null) => r ? `${r.isFloatingCoupon ? '~' : ''}${r.ytm.toFixed(2)}%` : '—' },
+                          { label: 'NET доходность', render: (r: Results | null) => r ? `${r.netYield.toFixed(2)}%` : '—', highlight: true },
+                          { label: 'Окупаемость', render: (r: Results | null) => r ? (r.paybackMonths < 0 ? 'Не окупается' : r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`) : '—' },
+                          { label: 'Чистая прибыль', render: (r: Results | null) => r ? `${r.netProfit >= 0 ? '+' : ''}${r.netProfit.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '—', profit: true },
+                        ].map(row => (
+                          <tr key={row.label} className="hover:opacity-80 transition-opacity" style={{ borderColor: 'var(--border-color)' }}>
+                            <td className="px-6 py-3 text-[9px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>{row.label}</td>
+                            {comparisonResults.map((r, ci) => (
+                              <td key={ci} className={`px-6 py-3 text-center text-[12px] ${row.highlight ? 'font-black' : 'font-medium'}`}
+                                style={row.highlight ? { color: 'var(--accent)' } : row.profit && r ? { color: r.netProfit >= 0 ? '#22c55e' : '#ef4444' } : { color: 'var(--text-primary)' }}>
+                                {row.render(r, ci)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </section>
