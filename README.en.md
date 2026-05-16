@@ -15,6 +15,7 @@ You buy a bond and want to know its real return — not just the coupon bid/ask,
 - **Total profit** over the bond's lifetime
 - **Cash flow chart** — month by month
 - **Detailed payment schedule** — every single payment
+- **Bond comparison** — add multiple bonds and compare metrics side by side
 
 ## Screenshots
 
@@ -26,11 +27,12 @@ You buy a bond and want to know its real return — not just the coupon bid/ask,
 ### 1. Find a bond
 
 Enter a ticker, ISIN, or name in the search box. The calculator will fetch it from MOEX and fill in the price, accrued interest (ACI), maturity date, and coupon schedule automatically.
+Supports OFZ government bonds, corporate bonds, Eurobonds, and substitution bonds.
 
 ### 2. Enter your parameters
 
 - **Investment amount** — how much money you're allocating
-- **Tax rate** — 13% for residents (or 0% for IIS-B type accounts)
+- **Tax rate** — 13% for residents (or 0% for IIS-B type accounts; auto-set for OFZ bonds)
 - **Broker commission** — usually 0.01–0.1%
 
 Everything else (price, face value, ACI, dates) is filled in automatically.
@@ -40,12 +42,16 @@ Everything else (price, face value, ACI, dates) is filled in automatically.
 On the right side you'll see:
 
 - **Net Yield** — the main metric
-- **YTM** — gross yield
+- **YTM** — yield to maturity
 - **Payback** — when the premium is recovered
 - **Number of bonds** — how many fit your budget
 - **Chart** — capital growth over time
 - **Table** — each payment broken down
-- **PDF button** — save the report as a printable document
+- **PDF button** — save the report
+
+### 4. Compare bonds
+
+Click the `BarChart3` icon in the header to open the comparison table. Add bonds from the search results using the `+` button on the sidebar. The table shows up to 13 metrics side by side: price, coupon, YTM, Net Yield, payback period, and profit. In comparison mode, only the comparison table is printed.
 
 ## Deploy to a VPS
 
@@ -167,7 +173,7 @@ Open http://localhost:3000 in your browser.
 
 ## Tech stack
 
-React 19 · TypeScript · Vite · Tailwind CSS 4 · Recharts · MOEX ISS API
+React 19 · TypeScript · Vite · Tailwind CSS 4 · Recharts · Zod · MOEX ISS API · CBR API
 
 ## License
 
