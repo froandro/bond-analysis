@@ -122,6 +122,7 @@ export default function App() {
   }, []);
 
   const selectBond = useCallback(async (bond: any) => {
+    setShowComparison(false);
     setIsLoading(true);
     setBondSearch(bond.isin || bond.secid || bond.shortname);
     setSearchResults([]);
