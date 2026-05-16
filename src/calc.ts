@@ -38,11 +38,6 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   const cleanPriceVal = nominal * (pricePercent / 100);
   const dirtyPriceVal = cleanPriceVal + nkd;
 
-  const cleanPriceOne = nominal * (pricePercent / 100);
-  const dirtyPriceOne = cleanPriceOne + nkd;
-  const commOne = dirtyPriceOne * (commission / 100);
-  const totalCostOne = dirtyPriceOne + commOne;
-
   let bondCountVal = Math.floor(investment / (dirtyPriceVal * (1 + commission / 100)));
   if (bondCountVal <= 0) return null;
 
@@ -121,14 +116,14 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   const couponCountVal = events.filter(e => e.type === 'coupon').length;
   let totalNetCoupons = 0;
 
-  const cashFlows: number[] = [-dirtyPriceOne];
+  const cashFlows: number[] = [-dirtyPriceVal];
   const cfDates: Date[] = [purchase];
-  const netCashFlows: number[] = [-dirtyPriceOne];
+  const netCashFlows: number[] = [-dirtyPriceVal];
 
   let currentNominal = nominal;
   let ytmCumulativeAccum = 0;
   let ytmNkdUsedForTax = nkd;
-  const ytmTotalOverpaymentVal = (dirtyPriceOne - nominal);
+  const ytmTotalOverpaymentVal = (dirtyPriceVal - nominal);
   let ytmPaybackDate: string | null = ytmTotalOverpaymentVal <= 0 ? purchase.toISOString().split('T')[0] : null;
 
   const portCashFlows: number[] = [-totalCostWithComm];

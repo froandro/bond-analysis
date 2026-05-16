@@ -679,7 +679,7 @@ export default function App() {
                         contentStyle={{ backgroundColor: '#161618', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', boxShadow: '0 10px 30px rgba(0,0,0,0.4)', color: '#fff', padding: '12px' }}
                         itemStyle={{ padding: '4px 0', color: '#fff', fontSize: '11px' }}
                         labelStyle={{ color: '#f97316', fontWeight: 'bold', fontSize: '12px', marginBottom: '8px' }}
-                        formatter={(value: any, name: any, props: any) => {
+                        formatter={(value: number, name: string, props: { payload?: { type?: string } }) => {
                           const type = props?.payload?.type || '';
                           const typeLabel: Record<string, string> = {
                             'OPEN': 'Открытие позиции',
@@ -743,7 +743,7 @@ export default function App() {
                         fill="url(#colorProfit)" 
                         animationDuration={2000}
                         name="Итого капитал"
-                        dot={(props: any) => {
+                        dot={(props: { cx?: number; cy?: number; payload?: { isPaybackPoint?: boolean } }) => {
                           if (props.payload?.isPaybackPoint) {
                             return (
                               <circle
