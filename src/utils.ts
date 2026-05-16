@@ -104,12 +104,21 @@ export function isFloatingCoupon(
   shortName?: string, coupons?: { value?: number }[]
 ): boolean {
   if (!bondType && !bondSubType && !couponType && !shortName) return false;
+
   const t = (bondType || bondSubType || couponType || '').toUpperCase();
+
+  // MOEX type fields explicitly indicate floating
   if (t.includes('FLOAT') || t.includes('VARIABLE') || t.includes('CPI') || t.includes('INDEX')) return true;
+
+  // MOEX type fields exist but don't indicate floating — trust MOEX classification
+  if (bondType || bondSubType || couponType) return false;
+
+  // No MOEX type info: fallback to name + coupon variance heuristics
   const name = (shortName || '').toUpperCase();
   if (name.includes('\u041F\u041B\u0410\u0412') || name.includes('\u041F\u0415\u0420\u0415\u041C') ||
       name.includes('\u0424\u041B\u041E\u0410\u0422') || name.includes('PK-') ||
       name.includes('FLOAT') || name.includes('VARIABLE')) return true;
+
   if (coupons && coupons.length > 1) {
     const vals = coupons.map(c => c.value).filter(v => v > 0);
     if (vals.length > 1) {

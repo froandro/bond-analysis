@@ -162,7 +162,7 @@ export default function App() {
       setBondTypeCache(prev => ({
         ...prev,
         [bondKey]: {
-          type: isFloatingCoupon(fullBond.BONDTYPE, fullBond.BONDSUBTYPE, fullBond.COUPONTYPE, fullBond.SHORTNAME, fullBond.coupons) ? 'Флоатер' : (getBondTypeLabel(fullBond.BONDTYPE, fullBond.BONDSUBTYPE) || ''),
+          type: getBondTypeLabel(fullBond.BONDTYPE, fullBond.BONDSUBTYPE) || '',
           couponPercent: Number(fullBond.COUPONPERCENT || 0)
         }
       }));
@@ -459,7 +459,7 @@ export default function App() {
                                  {selectedBond.SHORTNAME || selectedBond.SECNAME || selectedBond.SECID}
                                </span>
                                 <span className="text-[10px] font-bold text-orange-500 border border-orange-500/30 rounded px-2 py-0.5">
-                                  {isFloatingCoupon(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE, selectedBond.COUPONTYPE, selectedBond.SHORTNAME, selectedBond.coupons) ? 'Флоатер' : (getBondTypeLabel(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE) || '--')}
+                                  {getBondTypeLabel(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE) || '--'}
                                 </span>
                                <span className="text-[10px] font-bold text-orange-500">
                                  {selectedBond.COUPONPERCENT ? `${Number(selectedBond.COUPONPERCENT).toFixed(2)}%` : '--'}
