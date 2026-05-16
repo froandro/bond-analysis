@@ -903,16 +903,19 @@ export default function App() {
 
         {/* Print Report */}
         <div id="print-report">
-          {!showComparison && results && (() => {
-            const r = results;
+          {(() => {
             const now = new Date();
             const dateStr = now.toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
-            const bondName = selectedBond?.SHORTNAME || selectedBond?.SECID || 'Облигация';
-            const bondIsin = selectedBond?.ISIN || '—';
-
             return (
               <>
-              <div style={{ fontFamily: "'Inter', sans-serif", color: '#1a1a1c', background: 'white' }}>
+              {!showComparison && results && (() => {
+                const r = results;
+                const bondName = selectedBond?.SHORTNAME || selectedBond?.SECID || 'Облигация';
+                const bondIsin = selectedBond?.ISIN || '—';
+
+                return (
+                  <>
+                  <div style={{ fontFamily: "'Inter', sans-serif", color: '#1a1a1c', background: 'white' }}>
                 {/* Report Header */}
                 <div style={{ borderBottom: '2px solid #f97316', paddingBottom: 12, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                   <div>
@@ -1036,6 +1039,9 @@ export default function App() {
                   <span>ALZA // ОБЛИГАЦИОННЫЙ АРБИТРАЖ</span>
                 </div>
               </div>
+                </>
+              );
+            })()}
 
               {showComparison && comparisonList.length > 0 && comparisonResults.some(r => r !== null) && (
                 <div className="print-page-break" style={{ pageBreakBefore: 'always', fontFamily: "'Inter', sans-serif", color: '#1a1a1c', background: 'white', marginTop: 32 }}>
