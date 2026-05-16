@@ -31,6 +31,7 @@ import {
   MOEX_BOARDS, searchBonds, fetchBondBoards, fetchBondDetails, fetchBondization
 } from './api/moex';
 import { computeResults, extractBondParams } from './calc';
+import { parseBondData, parseSearchResult } from './validation';
 
 function Tooltip({ children, text }: { children: React.ReactNode; text: string }) {
   return (
@@ -57,7 +58,7 @@ export default function App() {
   const [commission, setCommission] = useState(0.05);
   const [nextCouponDate, setNextCouponDate] = useState('');
   const [bondSearch, setBondSearch] = useState('');
-  const [searchResults, setSearchResults] = useState<BondData[]>([]);
+  const [searchResults, setSearchResults] = useState<Record<string, unknown>[]>([]);
   const [selectedBond, setSelectedBond] = useState<BondData | null>(null);
   const [currency, setCurrency] = useState('RUB');
   const [isLoading, setIsLoading] = useState(false);
@@ -99,7 +100,7 @@ export default function App() {
         const type = String(s.type || '').toLowerCase();
         return bondGroups.includes(group) || bondTypes.includes(type);
       });
-      setSearchResults(filtered as unknown as BondData[]);
+      setSearchResults(filtered.map(r => parseSearchResult(r)).filter((r): r is Record<string, unknown> => r !== null));
     } catch (e) {
       console.error('Search error:', e);
     } finally {
@@ -138,12 +139,16 @@ export default function App() {
         throw new Error('Security details not found');
       }
 
-      const fullBond = {
+      const fullBondRaw = {
         ...secData,
         ...marketData,
         amortizations: amortizationData,
         coupons: couponSchedule
-      } as BondData;
+      };
+      const fullBond = parseBondData(fullBondRaw);
+      if (!fullBond) {
+        throw new Error('Invalid bond data from MOEX');
+      }
       setSelectedBond(fullBond);
 
       const bondKey = secId.toUpperCase();
