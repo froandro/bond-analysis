@@ -83,8 +83,53 @@ const TOOLTIPS = {
 const MOEX_BASE_URL = "https://iss.moex.com/iss";
 const MOEX_ENGINE = "stock";
 const MOEX_MARKET = "bonds";
-const MOEX_BOARDS = ["TQCB", "TQOB", "TQOS", "PACT"];
+const MOEX_BOARDS = ["TQCB", "TQOB", "TQOS", "PACT", "TQBD"];
 const DAYS_IN_YEAR = 365.25;
+
+// --- Exchange Rates (CBR) ---
+const CBR_URL = "https://www.cbr-xml-daily.ru/daily_json.js";
+let _cachedRates: Record<string, number> | null = null;
+let _lastRateFetch = 0;
+const RATE_CACHE_TTL = 60 * 60 * 1000;
+
+async function fetchExchangeRates(): Promise<Record<string, number>> {
+  const now = Date.now();
+  if (_cachedRates && now - _lastRateFetch < RATE_CACHE_TTL) return _cachedRates;
+  try {
+    const resp = await fetch(CBR_URL);
+    const data = await resp.json();
+    const rates: Record<string, number> = { RUB: 1 };
+    for (const [code, val] of Object.entries(data.Valute as Record<string, { Value: number; Nominal: number }>)) {
+      rates[code] = val.Value / val.Nominal;
+    }
+    _cachedRates = rates;
+    _lastRateFetch = now;
+    return rates;
+  } catch {
+    return { RUB: 1 };
+  }
+}
+
+function getDefaultInvestment(curr: string): number {
+  switch (curr) {
+    case 'RUB': return 300000;
+    case 'USD': return 3000;
+    case 'EUR': return 3000;
+    case 'CNY': return 20000;
+    case 'XAU': return 100;
+    default: return 300000;
+  }
+}
+
+async function convertInvestment(amount: number, from: string, to: string): Promise<number> {
+  if (from === to) return amount;
+  const rates = await fetchExchangeRates();
+  const fromRub = from === 'RUB' ? amount : amount * (rates[from] || 0);
+  const result = to === 'RUB' ? fromRub : fromRub / (rates[to] || 1);
+  if (isNaN(result) || !isFinite(result) || result <= 0) return getDefaultInvestment(to);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(result)) - 1);
+  return Math.round(result / Math.max(magnitude, 1)) * Math.max(magnitude, 1) || getDefaultInvestment(to);
+}
 
 // --- Types ---
 interface BondData {
@@ -294,7 +339,12 @@ export default function App() {
         const securities = data.securities.data
           .map((row: any[]) => Object.fromEntries(columns.map((col: string, i: number) => [col, row[i]])))
           .filter((s: any) => {
-            return MOEX_BOARDS.includes(s.primary_boardid);
+            if (MOEX_BOARDS.includes(s.primary_boardid)) return true;
+            const bondGroups = ['stock_bonds'];
+            const bondTypes = ['corporate_bond', 'government_bond', 'ofz_bond', 'exchange_bond', 'municipal_bond', 'subfederal_bond', 'euro_bond'];
+            const group = (s.group || '').toLowerCase();
+            const type = (s.type || '').toLowerCase();
+            return bondGroups.includes(group) || bondTypes.includes(type);
           });
         setSearchResults(securities);
       }
@@ -411,7 +461,12 @@ export default function App() {
         actualCurrency = 'XAU';
       }
 
-      setCurrency(normalizeCurrency(actualCurrency));
+      const prevCurrency = currency;
+      const newCurrency = normalizeCurrency(actualCurrency);
+      if (newCurrency !== prevCurrency) {
+        setInvestment(await convertInvestment(investment, prevCurrency, newCurrency));
+      }
+      setCurrency(newCurrency);
       
     } catch (e) {
       console.error('Selection error:', e);
@@ -419,7 +474,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [currency, investment]);
 
   // Calculation Memo
   const results: Results | null = useMemo(() => {
