@@ -438,7 +438,65 @@ export default function App() {
         {/* Analytic Viewports */}
         <section ref={resultsRef} className={`xl:col-span-9 p-8 lg:p-16 space-y-16 overflow-y-auto max-h-[calc(100vh-140px)] ${isDark ? 'dark' : ''}`} style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
           
-          {!results ? (
+          {showComparison && comparisonList.length > 0 && comparisonResults.some(r => r !== null) ? (
+            <div className="space-y-6 w-full">
+              <div className="flex justify-between items-end px-2">
+                <h2 className="text-[10px] font-mono tracking-[0.5em] uppercase" style={{ color: 'var(--text-secondary)' }}>Сравнение облигаций</h2>
+                <span className="text-[9px] opacity-50 font-bold">{comparisonList.length} шт.</span>
+              </div>
+              <div className="overflow-x-auto rounded-3xl border shadow-2xl no-scrollbar" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+                <table className="w-full text-[11px] font-mono text-left border-collapse">
+                  <thead>
+                    <tr className="border-b opacity-60" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+                      <th className="px-6 py-4 font-normal text-[10px]" style={{ color: 'var(--text-secondary)' }}>МЕТРИКА</th>
+                      {comparisonList.map((entry, ci) => {
+                        const res = comparisonResults[ci];
+                        if (!res) return null;
+                        return (
+                          <th key={entry.id} className="px-6 py-4 text-center" style={{ color: 'var(--text-secondary)' }}>
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="font-bold text-[11px]" style={{ color: 'var(--text-primary)' }}>{entry.bond.SHORTNAME || entry.bond.SECID}</span>
+                              <span className="text-[8px] opacity-50">{entry.bond.ISIN}</span>
+                              <button onClick={() => removeComparison(entry.id)}
+                                className="text-[8px] uppercase tracking-wider opacity-40 hover:opacity-100 transition-opacity"
+                                style={{ color: '#ef4444' }}>Удалить</button>
+                            </div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: 'var(--border-color)' }}>
+                    {[
+                      { label: 'Тип', render: (_: any, ci: number) => getBondTypeLabel(comparisonList[ci].bond.BONDTYPE, comparisonList[ci].bond.BONDSUBTYPE) || '\u2014' },
+                      { label: 'ISIN', render: (_: any, ci: number) => comparisonList[ci].bond.ISIN || '\u2014' },
+                      { label: '\u0426\u0435\u043D\u0430, %', render: (_: any, ci: number) => comparisonList[ci].params.pricePercent.toFixed(2) },
+                      { label: '\u041D\u041A\u0414', render: (r: Results | null) => r ? `${r.cleanPrice.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '\u2014' },
+                      { label: '\u041A\u0443\u043F\u043E\u043D, %', render: (_: any, ci: number) => `${comparisonList[ci].params.couponRate.toFixed(2)}%` },
+                      { label: '\u0412\u044B\u043F\u043B\u0430\u0442\u0430', render: (_: any, ci: number) => `${comparisonList[ci].params.couponFrequency} \u0440\u0430\u0437/\u0433\u043E\u0434` },
+                      { label: '\u0414\u043D\u0435\u0439 \u0434\u043E \u043F\u043E\u0433\u0430\u0448.', render: (r: Results | null) => r ? `${r.daysToMaturity}` : '\u2014' },
+                      { label: '\u041A\u043E\u043B-\u0432\u043E', render: (r: Results | null) => r ? `${r.bondCount} \u0448\u0442.` : '\u2014' },
+                      { label: '\u0422\u0435\u043A. \u0434\u043E\u0445\u043E\u0434\u043D\u043E\u0441\u0442\u044C', render: (r: Results | null) => r ? `${r.currentYield.toFixed(2)}%` : '\u2014' },
+                      { label: 'YTM', render: (r: Results | null) => r ? `${r.isFloatingCoupon ? '~' : ''}${r.ytm.toFixed(2)}%` : '\u2014' },
+                      { label: 'NET \u0434\u043E\u0445\u043E\u0434\u043D\u043E\u0441\u0442\u044C', render: (r: Results | null) => r ? `${r.netYield.toFixed(2)}%` : '\u2014', highlight: true },
+                      { label: '\u041E\u043A\u0443\u043F\u0430\u0435\u043C\u043E\u0441\u0442\u044C', render: (r: Results | null) => r ? (r.paybackMonths < 0 ? '\u041D\u0435 \u043E\u043A\u0443\u043F\u0430\u0435\u0442\u0441\u044F' : r.totalOverpayment <= 0 ? '\u0421\u0440\u0430\u0437\u0443' : `${r.paybackMonths.toFixed(1)} \u043C\u0435\u0441.`) : '\u2014' },
+                      { label: '\u0427\u0438\u0441\u0442\u0430\u044F \u043F\u0440\u0438\u0431\u044B\u043B\u044C', render: (r: Results | null) => r ? `${r.netProfit >= 0 ? '+' : ''}${r.netProfit.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '\u2014', profit: true },
+                    ].map(row => (
+                      <tr key={row.label} className="hover:opacity-80 transition-opacity" style={{ borderColor: 'var(--border-color)' }}>
+                        <td className="px-6 py-3 text-[9px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>{row.label}</td>
+                        {comparisonResults.map((r, ci) => (
+                          <td key={ci} className={`px-6 py-3 text-center text-[12px] ${row.highlight ? 'font-black' : 'font-medium'}`}
+                            style={row.highlight ? { color: 'var(--accent)' } : row.profit && r ? { color: r.netProfit >= 0 ? '#22c55e' : '#ef4444' } : { color: 'var(--text-primary)' }}>
+                            {row.render(r, ci)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : !results ? (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-8 py-20">
               <div className="w-24 h-24 border rounded-3xl flex items-center justify-center shadow-inner" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
                 <Calculator size={32} style={{ color: 'var(--text-muted)' }} />
@@ -825,65 +883,6 @@ export default function App() {
                 </div>
               </div>
 
-              {showComparison && comparisonList.length > 0 && comparisonResults.some(r => r !== null) && (
-                <div className="space-y-6">
-                  <div className="flex justify-between items-end px-2">
-                    <h2 className="text-[10px] font-mono tracking-[0.5em] uppercase" style={{ color: 'var(--text-secondary)' }}>Сравнение облигаций</h2>
-                    <span className="text-[9px] opacity-50 font-bold">{comparisonList.length} шт.</span>
-                  </div>
-                  <div className="overflow-x-auto rounded-3xl border shadow-2xl no-scrollbar" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
-                    <table className="w-full text-[11px] font-mono text-left border-collapse">
-                      <thead>
-                        <tr className="border-b opacity-60" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
-                          <th className="px-6 py-4 font-normal text-[10px]" style={{ color: 'var(--text-secondary)' }}>МЕТРИКА</th>
-                          {comparisonList.map((entry, ci) => {
-                            const res = comparisonResults[ci];
-                            if (!res) return null;
-                            return (
-                              <th key={entry.id} className="px-6 py-4 text-center" style={{ color: 'var(--text-secondary)' }}>
-                                <div className="flex flex-col items-center gap-1">
-                                  <span className="font-bold text-[11px]" style={{ color: 'var(--text-primary)' }}>{entry.bond.SHORTNAME || entry.bond.SECID}</span>
-                                  <span className="text-[8px] opacity-50">{entry.bond.ISIN}</span>
-                                  <button onClick={() => removeComparison(entry.id)}
-                                    className="text-[8px] uppercase tracking-wider opacity-40 hover:opacity-100 transition-opacity"
-                                    style={{ color: '#ef4444' }}>Удалить</button>
-                                </div>
-                              </th>
-                            );
-                          })}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y" style={{ borderColor: 'var(--border-color)' }}>
-                        {[
-                          { label: 'Тип', render: (_: any, ci: number) => getBondTypeLabel(comparisonList[ci].bond.BONDTYPE, comparisonList[ci].bond.BONDSUBTYPE) || '—' },
-                          { label: 'ISIN', render: (_: any, ci: number) => comparisonList[ci].bond.ISIN || '—' },
-                          { label: 'Цена, %', render: (_: any, ci: number) => comparisonList[ci].params.pricePercent.toFixed(2) },
-                          { label: 'НКД', render: (r: Results | null) => r ? `${r.cleanPrice.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '—' },
-                          { label: 'Купон, %', render: (_: any, ci: number) => `${comparisonList[ci].params.couponRate.toFixed(2)}%` },
-                          { label: 'Выплата', render: (_: any, ci: number) => `${comparisonList[ci].params.couponFrequency} раз/год` },
-                          { label: 'Дней до погаш.', render: (r: Results | null) => r ? `${r.daysToMaturity}` : '—' },
-                          { label: 'Кол-во', render: (r: Results | null) => r ? `${r.bondCount} шт.` : '—' },
-                          { label: 'Тек. доходность', render: (r: Results | null) => r ? `${r.currentYield.toFixed(2)}%` : '—' },
-                          { label: 'YTM', render: (r: Results | null) => r ? `${r.isFloatingCoupon ? '~' : ''}${r.ytm.toFixed(2)}%` : '—' },
-                          { label: 'NET доходность', render: (r: Results | null) => r ? `${r.netYield.toFixed(2)}%` : '—', highlight: true },
-                          { label: 'Окупаемость', render: (r: Results | null) => r ? (r.paybackMonths < 0 ? 'Не окупается' : r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`) : '—' },
-                          { label: 'Чистая прибыль', render: (r: Results | null) => r ? `${r.netProfit >= 0 ? '+' : ''}${r.netProfit.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '—', profit: true },
-                        ].map(row => (
-                          <tr key={row.label} className="hover:opacity-80 transition-opacity" style={{ borderColor: 'var(--border-color)' }}>
-                            <td className="px-6 py-3 text-[9px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>{row.label}</td>
-                            {comparisonResults.map((r, ci) => (
-                              <td key={ci} className={`px-6 py-3 text-center text-[12px] ${row.highlight ? 'font-black' : 'font-medium'}`}
-                                style={row.highlight ? { color: 'var(--accent)' } : row.profit && r ? { color: r.netProfit >= 0 ? '#22c55e' : '#ef4444' } : { color: 'var(--text-primary)' }}>
-                                {row.render(r, ci)}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
             </>
           )}
         </section>
