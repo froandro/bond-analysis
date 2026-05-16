@@ -1,13 +1,7 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   Search, 
   Download, 
-  X, 
   RotateCcw, 
   TrendingUp, 
   Calendar, 
@@ -40,15 +34,17 @@ import {
   ReferenceDot,
   Scatter
 } from 'recharts';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 
-// --- Utility for Tailwind classes ---
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import type { BondData, Results, MoexCoupon } from './types';
+import {
+  cn, TOOLTIPS, getDaysBetween, normalizeCurrency, getCurrencySymbol, clamp,
+  isFloatingCoupon, getBondTypeLabel, calculateYTM, fetchExchangeRates,
+  getDefaultInvestment, convertInvestment
+} from './utils';
+import {
+  MOEX_BOARDS, searchBonds, fetchBondBoards, fetchBondDetails, fetchBondization
+} from './api/moex';
 
-// --- Tooltip Component ---
 function Tooltip({ children, text }: { children: React.ReactNode; text: string }) {
   return (
     <div className="relative inline-block group">
@@ -61,242 +57,7 @@ function Tooltip({ children, text }: { children: React.ReactNode; text: string }
   );
 }
 
-// --- Tooltip texts ---
-const TOOLTIPS = {
-  ytm: "Доходность к погашению с учётом реинвестирования купонов",
-  netYield: "YTM за вычетом налога на купоны",
-  currentYield: "Годовой купон / текущая цена (без реинвестирования)",
-  simpleYield: "Купон / номинал (не учитывает цену покупки)",
-  payback: "За сколько месяцев купоны покроют премию над номиналом",
-  price: "Сумма, которую вернут при погашении",
-  cleanPrice: "Стоимость облигации без НКД",
-  dirtyPrice: "Чистая цена + НКД",
-  nkd: "Накопленный купон, который платите продавцу",
-  commission: "Обычно 0.01-0.1% от сделки",
-  tax: "13% для резидентов, 0% для ИИС типа Б",
-  coupon: "Выплата владельцам 2-4 раза в год",
-  capitalGain: "Разница номинал − цена покупки",
-  netProfit: "Купоны + номинал − все расходы"
-};
-
-// --- Constants ---
-const MOEX_BASE_URL = "https://iss.moex.com/iss";
-const MOEX_ENGINE = "stock";
-const MOEX_MARKET = "bonds";
-const MOEX_BOARDS = ["TQCB", "TQOB", "TQOS", "PACT", "TQBD"];
-const DAYS_IN_YEAR = 365.25;
-
-// --- Exchange Rates (CBR) ---
-const CBR_URL = "https://www.cbr-xml-daily.ru/daily_json.js";
-let _cachedRates: Record<string, number> | null = null;
-let _lastRateFetch = 0;
-const RATE_CACHE_TTL = 60 * 60 * 1000;
-
-async function fetchExchangeRates(): Promise<Record<string, number>> {
-  const now = Date.now();
-  if (_cachedRates && now - _lastRateFetch < RATE_CACHE_TTL) return _cachedRates;
-  try {
-    const resp = await fetch(CBR_URL);
-    const data = await resp.json();
-    const rates: Record<string, number> = { RUB: 1 };
-    for (const [code, val] of Object.entries(data.Valute as Record<string, { Value: number; Nominal: number }>)) {
-      rates[code] = val.Value / val.Nominal;
-    }
-    _cachedRates = rates;
-    _lastRateFetch = now;
-    return rates;
-  } catch {
-    return { RUB: 1 };
-  }
-}
-
-function getDefaultInvestment(curr: string): number {
-  switch (curr) {
-    case 'RUB': return 300000;
-    case 'USD': return 3000;
-    case 'EUR': return 3000;
-    case 'CNY': return 20000;
-    case 'XAU': return 100;
-    default: return 300000;
-  }
-}
-
-async function convertInvestment(amount: number, from: string, to: string): Promise<number> {
-  if (from === to) return amount;
-  const rates = await fetchExchangeRates();
-  const fromRub = from === 'RUB' ? amount : amount * (rates[from] || 0);
-  const result = to === 'RUB' ? fromRub : fromRub / (rates[to] || 1);
-  if (isNaN(result) || !isFinite(result) || result <= 0) return getDefaultInvestment(to);
-  const magnitude = Math.pow(10, Math.floor(Math.log10(result)) - 1);
-  return Math.round(result / Math.max(magnitude, 1)) * Math.max(magnitude, 1) || getDefaultInvestment(to);
-}
-
-// --- Types ---
-interface BondData {
-  SECID: string;
-  ISIN: string;
-  SHORTNAME: string;
-  BOARDID: string;
-  NOMINAL?: number;
-  INITIALNOMINAL?: number;
-  FACEVALUE?: number;
-  COUPONVALUE?: number;
-  COUPONPERCENT?: number;
-  MATDATE: string;
-  MATURITYDATE?: string;
-  ACCRUEDINT: number;
-  NEXTCOUPON: string;
-  COUPONPERIOD: number;
-  CURRENCY?: string;
-  CURRENCYID?: string;
-  FACEUNIT?: string;
-  INITIALFACEVALUE?: number;
-  FACEVALUE_CURRENCY?: string;
-  NAME: string;
-  EMITENT_FULL_NAME_RU: string;
-  DURATION?: number;
-  ZSPREAD?: number;
-  GSPREAD?: number;
-  BONDTYPE?: string;
-  BONDSUBTYPE?: string;
-  COUPONTYPE?: string;
-  ACTUAL_PRICE?: number;
-  PREVPRICE?: number;
-  amortizations?: any[];
-  coupons?: any[];
-}
-
-interface Results {
-  cleanPrice: number;
-  dirtyPrice: number;
-  bondCount: number;
-  totalCost: number;
-  remainder: number;
-  periodCoupon: number;
-  netCoupon: number;
-  annualCoupon: number;
-  netAnnualTotal: number;
-  totalOverpayment: number;
-  currentYield: number; // Current Yield (годовой купон / цена)
-  simpleYield: number;  // Simple Yield (годовой купон / номинал)
-  ytm: number;
-  netYield: number;
-  totalCouponToMaturity: number;
-  finalAmount: number; // Total payout at end
-  netProfit: number;
-  commissionAmount: number;
-  totalTaxPaid: number;
-  daysToMaturity: number;
-  couponCount: number;
-  paybackMonths: number;
-  paybackDate: string | null;
-  capitalGain: number; // nominal * count - purchase price * count
-  grossCouponTotal: number;
-  cashFlows: { date: string; amount: number; cumulative: number; overpayment: number; flow: number; type: string; gross: number; tax: number }[];
-}
-
-// --- Calculation Helpers ---
-function getDaysBetween(date1: Date, date2: Date) {
-  const diffTime = Math.abs(date2.getTime() - date1.getTime());
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-}
-
-function normalizeCurrency(curr: string) {
-  if (!curr) return 'RUB';
-  const c = curr.toUpperCase();
-  if (c === 'SUR' || c === 'RUB' || c === 'RUB_РФ' || c === 'RUR') return 'RUB';
-  if (c === 'USD' || c === 'USD_США') return 'USD';
-  if (c === 'EUR' || c === 'EUR_ЕВРО') return 'EUR';
-  if (c === 'CNY' || c === 'CNY_КИТАЙ' || c === 'CNY_CNH') return 'CNY';
-  if (c === 'GLD' || c === 'XAU' || c === 'RUB_GOLD' || c === 'ГРАММ') return 'XAU';
-  return c;
-}
-
-function getCurrencySymbol(curr: string) {
-  switch (curr) {
-    case 'RUB': return '₽';
-    case 'USD': return '$';
-    case 'EUR': return '€';
-    case 'CNY': return '¥';
-    case 'XAU': return 'Au (г)';
-    default: return curr;
-  }
-}
-
-function getBondTypeLabel(bondType?: string, bondSubType?: string): string {
-  const type = (bondType || bondSubType || '').toUpperCase();
-  if (!type) return '';
-  switch (type) {
-    case 'FIXED': return 'Постоянный';
-    case 'FLOATING': return 'Флоатер';
-    case 'FLOAT': return 'Флоатер';
-    case 'VARIABLE': return 'Переменный';
-    case 'AMORTIZE': return 'Амортизация';
-    case 'AMORTIZATION': return 'Амортизация';
-    case 'AMORTIZIRUEM': return 'Амортизация';
-    case 'AMORTIZIRUYEM': return 'Амортизация';
-    case 'STEP': return 'Ступенчатый';
-    case 'CALLABLE': return 'Колл';
-    case 'PUTTABLE': return 'Пут';
-    case 'CPI': return 'Индексация';
-    case 'INDEXED': return 'Индексация';
-    case 'CLASSIC': return 'Классический';
-    default: return type;
-  }
-}
-
-function calculateYTM(cashFlows: number[], dates: Date[], purchaseDate: Date) {
-  if (cashFlows.length < 2) return 0;
-
-  const npv = (rate: number) => {
-    let sum = 0;
-    for (let i = 0; i < cashFlows.length; i++) {
-      const years = (dates[i].getTime() - purchaseDate.getTime()) / (1000 * 60 * 60 * 24 * DAYS_IN_YEAR);
-      sum += cashFlows[i] / Math.pow(1 + rate / 100, years);
-    }
-    return sum;
-  };
-
-  // Bisection method — guaranteed convergence
-  let low = -50;
-  let high = 200;
-  let npvLow = npv(low);
-  let npvHigh = npv(high);
-
-  // If signs are the same, expand range
-  if (npvLow * npvHigh > 0) {
-    for (let mult of [3, 10, 50]) {
-      low = -mult * 100;
-      high = mult * 100;
-      npvLow = npv(low);
-      npvHigh = npv(high);
-      if (npvLow * npvHigh < 0) break;
-    }
-    if (npvLow * npvHigh > 0) return 0;
-  }
-
-  for (let iter = 0; iter < 500; iter++) {
-    const mid = (low + high) / 2;
-    const val = npv(mid);
-
-    if (Math.abs(val) < 0.01 || (high - low) / 2 < 1e-8) {
-      return mid;
-    }
-
-    if (val * npvLow < 0) {
-      high = mid;
-    } else {
-      low = mid;
-      npvLow = val;
-    }
-  }
-
-  return (low + high) / 2;
-}
-
-// --- Main Component ---
 export default function App() {
-  // Input State
   const [investment, setInvestment] = useState(300000);
   const [nominal, setNominal] = useState(1000);
   const [pricePercent, setPricePercent] = useState(100);
@@ -319,10 +80,8 @@ export default function App() {
     document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
 
-  // Cache for bond types
   const [bondTypeCache, setBondTypeCache] = useState<Record<string, { type: string; couponPercent: number }>>({});
 
-  // Search Logic
   const handleSearch = useCallback(async (query: string) => {
     if (query.length < 3) {
       setSearchResults([]);
@@ -330,24 +89,16 @@ export default function App() {
     }
     setIsLoading(true);
     try {
-      const url = `${MOEX_BASE_URL}/securities.json?q=${encodeURIComponent(query)}&iss.meta=off&iss.only=securities`;
-      const resp = await fetch(url);
-      const data = await resp.json();
-      
-      if (data.securities && data.securities.data) {
-        const columns = data.securities.columns;
-        const securities = data.securities.data
-          .map((row: any[]) => Object.fromEntries(columns.map((col: string, i: number) => [col, row[i]])))
-          .filter((s: any) => {
-            if (MOEX_BOARDS.includes(s.primary_boardid)) return true;
-            const bondGroups = ['stock_bonds'];
-            const bondTypes = ['corporate_bond', 'government_bond', 'ofz_bond', 'exchange_bond', 'municipal_bond', 'subfederal_bond', 'euro_bond'];
-            const group = (s.group || '').toLowerCase();
-            const type = (s.type || '').toLowerCase();
-            return bondGroups.includes(group) || bondTypes.includes(type);
-          });
-        setSearchResults(securities);
-      }
+      const securities = await searchBonds(query);
+      const filtered = securities.filter((s) => {
+        if (MOEX_BOARDS.includes(String(s.primary_boardid || ''))) return true;
+        const bondGroups = ['stock_bonds'];
+        const bondTypes = ['corporate_bond', 'government_bond', 'ofz_bond', 'exchange_bond', 'municipal_bond', 'subfederal_bond', 'euro_bond'];
+        const group = String(s.group || '').toLowerCase();
+        const type = String(s.type || '').toLowerCase();
+        return bondGroups.includes(group) || bondTypes.includes(type);
+      });
+      setSearchResults(filtered as unknown as BondData[]);
     } catch (e) {
       console.error('Search error:', e);
     } finally {
@@ -359,89 +110,60 @@ export default function App() {
     setIsLoading(true);
     setBondSearch(bond.isin || bond.secid || bond.shortname);
     setSearchResults([]);
-    
+
     try {
       const secId = bond.secid || bond.SECID;
-      // 1. Fetch available boards for this security
-      const boardsUrl = `${MOEX_BASE_URL}/securities/${secId}.json?iss.meta=off&iss.only=boards`;
-      const bResp = await fetch(boardsUrl);
-      const bData = await bResp.json();
-      
-      // Try to find the best board (prefer TQCB, TQOB)
-      let targetBoard = bond.primary_boardid || bond.BOARDID;
-      if (bData.boards && bData.boards.data) {
-        const boardsList = bData.boards.data.map((b: any) => b[bData.boards.columns.indexOf('boardid')]);
-        const preferred = MOEX_BOARDS.find(b => boardsList.includes(b));
-        if (preferred) targetBoard = preferred;
-        else if (boardsList.length > 0) targetBoard = boardsList[0];
-      }
 
-      // 2. Fetch full security info
-      const detailsUrl = `${MOEX_BASE_URL}/engines/${MOEX_ENGINE}/markets/${MOEX_MARKET}/boards/${targetBoard}/securities/${secId}.json?iss.meta=off`;
-      const dResp = await fetch(detailsUrl);
-      const dData = await dResp.json();
-      
-      // 3. Fetch Bondization (Amortizations and Coupons)
-      let amortizationData: any[] = [];
-      let couponSchedule: any[] = [];
+      const boardsList = await fetchBondBoards(secId);
+      let targetBoard = bond.primary_boardid || bond.BOARDID;
+      const preferred = MOEX_BOARDS.find(b => boardsList.includes(b));
+      if (preferred) targetBoard = preferred;
+      else if (boardsList.length > 0) targetBoard = boardsList[0];
+
+      const { securities: secData, marketdata: marketData } = await fetchBondDetails(secId, targetBoard);
+
+      let amortizationData: Record<string, unknown>[] = [];
+      let couponSchedule: MoexCoupon[] = [];
       try {
-        const bzUrl = `${MOEX_BASE_URL}/statistics/engines/stock/markets/bonds/bondization/${secId}.json?iss.meta=off`;
-        const bzResp = await fetch(bzUrl);
-        const bzData = await bzResp.json();
-        if (bzData.amortizations && bzData.amortizations.data) {
-          const cols = bzData.amortizations.columns;
-          amortizationData = bzData.amortizations.data.map((row: any[]) => Object.fromEntries(cols.map((col: string, i: number) => [col, row[i]])));
-        }
-        if (bzData.coupons && bzData.coupons.data) {
-          const cols = bzData.coupons.columns;
-          couponSchedule = bzData.coupons.data.map((row: any[]) => Object.fromEntries(cols.map((col: string, i: number) => [col, row[i]])));
-        }
+        const bzData = await fetchBondization(secId);
+        amortizationData = bzData.amortizations;
+        couponSchedule = bzData.coupons;
       } catch (bzErr) {
         console.warn('Bondization fetch failed:', bzErr);
       }
 
-      if (!dData.securities || !dData.securities.data.length) {
+      if (!secData || Object.keys(secData).length === 0) {
         throw new Error('Security details not found');
       }
 
-      const secColumns = dData.securities.columns;
-      const secData = Object.fromEntries(secColumns.map((col: string, i: number) => [col, dData.securities.data[0][i]]));
-      
-      const marketColumns = dData.marketdata.columns;
-      const mData = dData.marketdata.data[0];
-      const marketData = mData ? Object.fromEntries(marketColumns.map((col: string, i: number) => [col, mData[i]])) : {};
-      
-      const fullBond = { 
-        ...secData, 
-        ...marketData, 
-        amortizations: amortizationData, 
-        coupons: couponSchedule 
+      const fullBond = {
+        ...secData,
+        ...marketData,
+        amortizations: amortizationData,
+        coupons: couponSchedule
       } as BondData;
       setSelectedBond(fullBond);
 
-      // Cache bond type
       const bondKey = secId.toUpperCase();
       setBondTypeCache(prev => ({
         ...prev,
         [bondKey]: {
-          type: getBondTypeLabel(fullBond.BONDTYPE, fullBond.BONDSUBTYPE),
-          couponPercent: Number(fullBond.COUPONPERCENT || 0)
+          type: getBondTypeLabel(String(secData.BONDTYPE || ''), String(secData.BONDSUBTYPE || '')),
+          couponPercent: Number(secData.COUPONPERCENT || 0)
         }
       }));
 
-      // Update Inputs - Robust detection for multi-currency bonds
       const nom = Number(Number(fullBond.FACEVALUE || fullBond.NOMINAL || fullBond.INITIALFACEVALUE || 1000).toFixed(2));
       const priceVal = Number(Number(marketData.LAST || marketData.WAPRICE || marketData.LCURRENTPRICE || marketData.LCLOSEPRICE || fullBond.PREVPRICE || 100).toFixed(2));
       const frequency = Math.round(365.25 / (Number(fullBond.COUPONPERIOD) || 91)) || 4;
-      
+
       let couponVal = Number(fullBond.COUPONPERCENT || 0);
       const couponValueAbs = Number(fullBond.COUPONVALUE || 0);
-      
-      // If percent is 0 but absolute value is known, try to derive percent
+
       if (couponVal === 0 && couponValueAbs > 0 && nom > 0) {
         couponVal = (couponValueAbs / nom) * (frequency || 1) * 100;
       }
-      
+
       setNominal(nom);
       setPricePercent(priceVal);
       setNkd(Number(Number(fullBond.ACCRUEDINT || 0).toFixed(2)));
@@ -449,15 +171,13 @@ export default function App() {
       setCouponFrequency(frequency);
       setMaturityDate(fullBond.MATDATE || fullBond.MATURITYDATE || '');
       setNextCouponDate(fullBond.NEXTCOUPON || '');
-      
-      // More robust currency detection: Prefer Nominal Currency (FACEUNIT) for overall bond metrics
-      let actualCurrency = fullBond.FACEUNIT || marketData.CURRENCYID || fullBond.CURRENCYID || fullBond.CURRENCY || '';
-      
-      // Special check for Gold Bonds (SELGOLD, etc)
+
+      let actualCurrency = String(fullBond.FACEUNIT || marketData.CURRENCYID || fullBond.CURRENCYID || fullBond.CURRENCY || '');
+
       const secName = (fullBond.NAME || '').toUpperCase();
       const secShort = (fullBond.SHORTNAME || '').toUpperCase();
       const sId = (secId || '').toUpperCase();
-      if (secName.includes('GOLD') || secShort.includes('GOLD') || secName.includes('ЗОЛОТО') || secShort.includes('ЗОЛОТО') || sId.includes('GOLD')) {
+      if (secName.includes('GOLD') || secShort.includes('GOLD') || secName.includes('\u0417\u041E\u041B\u041E\u0422\u041E') || secShort.includes('\u0417\u041E\u041B\u041E\u0422\u041E') || sId.includes('GOLD')) {
         actualCurrency = 'XAU';
       }
 
@@ -467,16 +187,15 @@ export default function App() {
         setInvestment(await convertInvestment(investment, prevCurrency, newCurrency));
       }
       setCurrency(newCurrency);
-      
+
     } catch (e) {
       console.error('Selection error:', e);
-      alert('Данные не найдены или облигация не торгуется.');
+      alert('\u0414\u0430\u043D\u043D\u044B\u0435 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u044B \u0438\u043B\u0438 \u043E\u0431\u043B\u0438\u0433\u0430\u0446\u0438\u044F \u043D\u0435 \u0442\u043E\u0440\u0433\u0443\u0435\u0442\u0441\u044F.');
     } finally {
       setIsLoading(false);
     }
   }, [currency, investment]);
 
-  // Calculation Memo
   const results: Results | null = useMemo(() => {
     if (!maturityDate || isNaN(nominal) || isNaN(pricePercent) || nominal <= 0) return null;
 
@@ -488,14 +207,12 @@ export default function App() {
     const daysToMat = getDaysBetween(purchase, maturity);
     const cleanPriceVal = nominal * (pricePercent / 100);
     const dirtyPriceVal = cleanPriceVal + nkd;
-    
-    // Per-bond cash flows for YTM calculation (always 1 bond)
+
     const cleanPriceOne = nominal * (pricePercent / 100);
     const dirtyPriceOne = cleanPriceOne + nkd;
     const commOne = dirtyPriceOne * (commission / 100);
     const totalCostOne = dirtyPriceOne + commOne;
 
-    // Correctly account for commission when calculating max affordable bonds
     let bondCountVal = Math.floor(investment / (dirtyPriceVal * (1 + commission / 100)));
     if (bondCountVal <= 0) return null;
 
@@ -506,15 +223,15 @@ export default function App() {
 
     const couponFreqVal = Math.max(1, couponFrequency);
     const couponPeriodDays = Math.round(365.25 / couponFreqVal);
-    
-    // Detailed Event Tracking for Amortization Support
-    const events: { date: Date; type: 'coupon' | 'amortization'; value: number }[] = [];
-    
-    // 1. Process Amortizations first to know the nominal at any point
+
+    const isFloater = selectedBond ? isFloatingCoupon(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE, selectedBond.COUPONTYPE, selectedBond.SHORTNAME, selectedBond.coupons) : false;
+
+    const events: { date: Date; type: string; value: number }[] = [];
+
     const amortSchedule: { date: Date; value: number }[] = [];
     if (selectedBond?.amortizations && selectedBond.amortizations.length > 0) {
       selectedBond.amortizations.forEach(a => {
-        const d = new Date(a.amortdate);
+        const d = new Date(String(a.amortdate));
         if (d > purchase) {
           amortSchedule.push({ date: d, value: Number(a.value) });
           if (d < maturity) {
@@ -525,36 +242,34 @@ export default function App() {
     }
     amortSchedule.sort((a, b) => a.date.getTime() - b.date.getTime());
 
-    // 2. Process Coupons (Values are in Face Currency)
     if (selectedBond?.coupons && selectedBond.coupons.length > 0) {
       selectedBond.coupons.forEach(c => {
-        const d = new Date(c.coupondate);
+        const d = new Date(String(c.coupondate));
         if (d > purchase && d <= maturity) {
           events.push({ date: d, type: 'coupon', value: Number(c.value) });
         }
       });
-      
-      // If the MOEX schedule is incomplete (ends before maturity), fill it
-      const lastKnownCouponDate = new Date(Math.max(...selectedBond.coupons.map(c => new Date(c.coupondate).getTime())));
+
+      const lastKnownCouponDate = new Date(Math.max(...selectedBond.coupons.map(c => new Date(String(c.coupondate)).getTime())));
       if (lastKnownCouponDate < maturity) {
+        const knownCoupons = selectedBond.coupons.filter(c => Number(c.value) > 0);
+        const lastCouponValue = knownCoupons.length > 0 ? Number(knownCoupons[knownCoupons.length - 1].value) : 0;
         let currentNext = new Date(lastKnownCouponDate);
         currentNext.setDate(currentNext.getDate() + couponPeriodDays);
         let safety = 0;
         while (currentNext <= maturity && safety < 100) {
-          // Calculate nominal at this future date
           const paidAmort = amortSchedule.filter(a => a.date < currentNext).reduce((sum, a) => sum + a.value, 0);
           const nominalAtDate = Math.max(0, nominal - paidAmort);
-          events.push({ date: new Date(currentNext), type: 'coupon', value: nominalAtDate * (couponRate / 100) / couponFreqVal });
+          const couponVal = isFloater && lastCouponValue > 0 ? lastCouponValue : nominalAtDate * (couponRate / 100) / couponFreqVal;
+          events.push({ date: new Date(currentNext), type: 'coupon', value: couponVal });
           currentNext.setDate(currentNext.getDate() + couponPeriodDays);
           safety++;
         }
       }
     } else {
-      // Fallback to full estimation
       let currentCoupon = nextCouponDate ? new Date(nextCouponDate) : new Date(purchase);
       if (!nextCouponDate) currentCoupon.setDate(currentCoupon.getDate() + couponPeriodDays);
-      
-      // Ensure we start after purchase
+
       let s1 = 0;
       while (currentCoupon <= purchase && s1 < 50) {
         currentCoupon.setDate(currentCoupon.getDate() + couponPeriodDays);
@@ -570,13 +285,12 @@ export default function App() {
         safetyCounter++;
       }
     }
-    
+
     events.sort((a, b) => a.date.getTime() - b.date.getTime());
 
     const couponCountVal = events.filter(e => e.type === 'coupon').length;
     let totalNetCoupons = 0;
-    
-    // YTM uses 1 bond for bond-level yield (rate-independent of investment amount)
+
     const cashFlows: number[] = [-totalCostOne];
     const cfDates: Date[] = [purchase];
     const netCashFlows: number[] = [-totalCostOne];
@@ -597,7 +311,6 @@ export default function App() {
     const ytmTotalOverpaymentVal = (dirtyPriceOne - nominal);
     let ytmPaybackDate: string | null = ytmTotalOverpaymentVal <= 0 ? purchase.toISOString().split('T')[0] : null;
 
-    // Portfolio-level cash flows (use bondCountVal)
     const portCashFlows: number[] = [-totalCostWithComm];
     const portCfDates: Date[] = [purchase];
     const netPortCashFlows: number[] = [-totalCostWithComm];
@@ -709,11 +422,11 @@ export default function App() {
     const capitalGainVal = (nominal * bondCountVal) - (cleanPriceVal * bondCountVal);
     const finalAmountVal = (nominal * bondCountVal) + totalNetCoupons;
     const netProfitVal = finalAmountVal - totalCostWithComm;
-    
+
     const firstCoupon = events.find(e => e.type === 'coupon')?.value || (nominal * (couponRate / 100) / couponFreqVal);
     const netCouponPerPeriod = firstCoupon * (1 - (taxRate / 100));
     const annualNetCoupon = netCouponPerPeriod * couponFreqVal * bondCountVal;
-    const paybackMonthsVal = totalOverpaymentVal <= 0 ? 0 : (annualNetCoupon > 0 ? (totalOverpaymentVal / (annualNetCoupon / 12)) : 0);
+    const paybackMonthsVal = !paybackDateVal ? -1 : (totalOverpaymentVal <= 0 ? 0 : (annualNetCoupon > 0 ? (totalOverpaymentVal / (annualNetCoupon / 12)) : 0));
 
     return {
       cleanPrice: cleanPriceVal,
@@ -741,6 +454,8 @@ export default function App() {
       paybackDate: paybackDateVal,
       capitalGain: capitalGainVal,
       grossCouponTotal: totalGrossCoupons,
+      isFloatingCoupon: isFloater,
+      knownCouponsOnly: false,
       cashFlows: portChartData
     };
   }, [investment, nominal, pricePercent, nkd, couponRate, couponFrequency, purchaseDate, maturityDate, taxRate, commission, nextCouponDate, selectedBond, currency]);
@@ -865,7 +580,7 @@ export default function App() {
                     <label className="text-[9px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Объем инвестиций</label>
                   </div>
                   <div className="flex items-center gap-2 rounded-lg px-3 py-2 shadow-inner focus-within:border-orange-500/30 transition-colors" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)' }}>
-                    <input type="number" value={investment} onChange={e => setInvestment(Number(e.target.value))} className="bg-transparent w-full text-sm font-bold outline-none" style={{ color: 'var(--text-primary)' }} />
+                    <input type="number" value={investment} onChange={e => setInvestment(Number(e.target.value) || 0)} className="bg-transparent w-full text-sm font-bold outline-none" style={{ color: 'var(--text-primary)' }} />
                     <span className="text-[10px] font-bold opacity-30 shrink-0">{getCurrencySymbol(currency)}</span>
                   </div>
                 </div>
@@ -911,7 +626,7 @@ export default function App() {
                   </div>
                   <div>
                     <label className="text-[9px] font-bold uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Выплата</label>
-                    <div className="flex items-center gap-2 rounded-lg px-3 py-2 italic shadow-inner" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)' }}>
+                    <div className="flex items-center gap-2 px-3 py-2 italic shadow-inner" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)' }}>
                       <span className="text-sm font-black" style={{ color: 'var(--text-muted)' }}>
                         {results ? (results.periodCoupon).toFixed(2) : (nominal * (couponRate / 100) / (couponFrequency || 1)).toFixed(2)}
                       </span>
@@ -923,7 +638,7 @@ export default function App() {
                   <div>
                     <label className="text-[9px] font-bold uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Частота</label>
                     <div className="flex items-center gap-2 rounded-lg px-3 py-2 shadow-inner" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)', borderWidth: '1px', borderStyle: 'solid' }}>
-                      <input type="number" value={couponFrequency} onChange={e => setCouponFrequency(Number(e.target.value))} className="bg-transparent w-full text-sm font-bold outline-none" style={{ color: 'var(--text-primary)' }} />
+                      <input type="number" min="1" max="12" value={couponFrequency} onChange={e => setCouponFrequency(clamp(Number(e.target.value) || 1, 1, 12))} className="bg-transparent w-full text-sm font-bold outline-none" style={{ color: 'var(--text-primary)' }} />
                     </div>
                   </div>
                   <div>
@@ -935,14 +650,14 @@ export default function App() {
                   <div>
                     <label className="text-[9px] font-bold uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Налог %</label>
                     <div className="flex items-center gap-2 rounded-lg px-3 py-2 shadow-inner" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)', borderWidth: '1px', borderStyle: 'solid' }}>
-                      <input type="number" value={taxRate} onChange={e => setTaxRate(Number(e.target.value))} className="bg-transparent w-full text-sm font-bold outline-none" style={{ color: 'var(--text-primary)' }} />
+                      <input type="number" value={taxRate} onChange={e => setTaxRate(clamp(Number(e.target.value) || 0, 0, 100))} className="bg-transparent w-full text-sm font-bold outline-none" style={{ color: 'var(--text-primary)' }} />
                       <span className="text-[10px] font-bold" style={{ color: 'var(--text-muted)' }}>%</span>
                     </div>
                   </div>
                   <div>
                     <label className="text-[9px] font-bold uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ком. %</label>
                     <div className="flex items-center rounded-lg px-3 py-2 shadow-inner" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border-color)', borderWidth: '1px', borderStyle: 'solid' }}>
-                      <input type="number" step="0.01" value={commission} onChange={e => setCommission(Number(e.target.value))} className="bg-transparent w-full text-sm font-bold outline-none" style={{ color: 'var(--text-primary)' }} />
+                      <input type="number" step="0.01" value={commission} onChange={e => setCommission(clamp(Number(e.target.value) || 0, 0, 100))} className="bg-transparent w-full text-sm font-bold outline-none" style={{ color: 'var(--text-primary)' }} />
                       <span className="text-[10px] font-bold" style={{ color: 'var(--text-muted)' }}>%</span>
                     </div>
                   </div>
@@ -975,19 +690,27 @@ export default function App() {
                 <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-8">
                   <div className="space-y-4">
                     <div className="flex flex-col gap-2">
-                       {selectedBond && (
-                         <div className="flex items-center gap-3">
-                            <span className="text-[10px] font-mono tracking-[0.5em] uppercase border-b pb-1" style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}>
-                             {selectedBond.SHORTNAME || selectedBond.SECNAME || selectedBond.SECID}
-                           </span>
-                           <span className="text-[10px] font-bold text-orange-500 border border-orange-500/30 rounded px-2 py-0.5">
-                             {getBondTypeLabel(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE) || '--'}
-                           </span>
-                           <span className="text-[10px] font-bold text-orange-500">
-                             {selectedBond.COUPONPERCENT ? `${Number(selectedBond.COUPONPERCENT).toFixed(2)}%` : '--'}
-                           </span>
-                         </div>
-                       )}
+                        {selectedBond && (
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-3">
+                               <span className="text-[10px] font-mono tracking-[0.5em] uppercase border-b pb-1" style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}>
+                                {selectedBond.SHORTNAME || selectedBond.SECNAME || selectedBond.SECID}
+                              </span>
+                              <span className="text-[10px] font-bold text-orange-500 border border-orange-500/30 rounded px-2 py-0.5">
+                                {getBondTypeLabel(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE) || '--'}
+                              </span>
+                              <span className="text-[10px] font-bold text-orange-500">
+                                {selectedBond.COUPONPERCENT ? `${Number(selectedBond.COUPONPERCENT).toFixed(2)}%` : '--'}
+                              </span>
+                            </div>
+                            {isFloatingCoupon(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE, selectedBond.COUPONTYPE, selectedBond.SHORTNAME, selectedBond.coupons) && (
+                              <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-bold" style={{ backgroundColor: 'rgba(234,179,8,0.1)', color: '#eab308' }}>
+                                <Info size={12} />
+                                Плавающий купон — текущая ставка может измениться. Расчёт приблизительный.
+                              </div>
+                            )}
+                          </div>
+                        )}
                        <div className="flex items-center gap-2">
                           <h2 className="text-[10px] font-mono tracking-[0.5em] uppercase" style={{ color: 'var(--text-secondary)' }}>Прогноз чистой доходности</h2>
                          <div className="group relative">
@@ -1003,6 +726,11 @@ export default function App() {
                       <span className="text-[100px] lg:text-[180px] font-black tracking-tighter">{results.netYield.toFixed(2)}</span>
                       <span className="text-4xl lg:text-7xl font-light" style={{ color: 'var(--text-muted)' }}>%</span>
                       <span className="ml-4 px-3 py-1.5 bg-orange-500/10 text-orange-500 rounded text-[10px] font-bold border border-orange-500/20 uppercase tracking-widest">NET APR</span>
+                      {results.isFloatingCoupon && (
+                        <span className="ml-2 px-2 py-1 text-[10px] font-bold rounded" style={{ backgroundColor: 'rgba(234,179,8,0.1)', color: '#eab308' }}>
+                          ~ по последнему купону
+                        </span>
+                      )}
                     </div>
                   </div>
                   
@@ -1014,12 +742,12 @@ export default function App() {
                             <Info size={10} style={{ color: 'var(--text-muted)' }} />
                           </Tooltip>
                         </div>
-                         <p className="text-2xl font-bold" style={{ color: 'var(--text-secondary)' }}>{results.ytm.toFixed(2)}%</p>
+                         <p className="text-2xl font-bold" style={{ color: 'var(--text-secondary)' }}>{results.isFloatingCoupon ? '~' : ''}{results.ytm.toFixed(2)}%</p>
                       </div>
                     <Tooltip text={TOOLTIPS.payback}>
                       <div className="space-y-1 cursor-help">
                         <span className="text-[10px] uppercase font-bold tracking-widest" style={{ color: 'var(--text-muted)' }}>Окупаемость</span>
-                         <p className="text-2xl font-bold" style={{ color: 'var(--text-secondary)' }}>{results.totalOverpayment <= 0 ? "Сразу" : `${results.paybackMonths.toFixed(1)} мес.`}</p>
+                         <p className="text-2xl font-bold" style={{ color: 'var(--text-secondary)' }}>{results.paybackMonths < 0 ? "Не окупается" : results.totalOverpayment <= 0 ? "Сразу" : `${results.paybackMonths.toFixed(1)} мес.`}</p>
                       </div>
                     </Tooltip>
                     <Tooltip text={TOOLTIPS.netProfit}>
@@ -1385,7 +1113,7 @@ export default function App() {
                   {[
                     { label: 'Чистая доходность (NET)', value: `${r.netYield.toFixed(2)}%`, color: '#f97316' },
                     { label: 'YTM (грязная)', value: `${r.ytm.toFixed(2)}%`, color: '#1a1a1c' },
-                    { label: 'Окупаемость', value: r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`, color: '#1a1a1c' },
+                    { label: 'Окупаемость', value: r.paybackMonths < 0 ? 'Не окупается' : r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`, color: '#1a1a1c' },
                     { label: 'Чистая прибыль', value: `+${r.netProfit.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}`, color: '#16a34a' },
                     { label: 'Общая выплата', value: `${r.finalAmount.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}`, color: '#1a1a1c' },
                     { label: 'Купонов получено', value: `${r.couponCount} шт.`, color: '#1a1a1c' },
