@@ -76,6 +76,7 @@ export default function App() {
   const [currency, setCurrency] = useState('RUB');
   const [isLoading, setIsLoading] = useState(false);
   const [isDark, setIsDark] = useState(true);
+  const [showComparison, setShowComparison] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
@@ -254,6 +255,11 @@ export default function App() {
             {results && (
               <div className="flex items-center gap-2 p-2 rounded-lg transition-colors cursor-pointer" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', color: 'var(--accent)' }} onClick={exportPDF}>
                 <Download size={16} style={{ color: 'var(--accent)' }} />
+              </div>
+            )}
+            {comparisonList.length > 0 && (
+              <div className="flex items-center gap-2 p-2 rounded-lg transition-colors cursor-pointer" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', color: showComparison ? 'var(--accent)' : 'var(--text-muted)' }} onClick={() => setShowComparison(v => !v)}>
+                <BarChart3 size={16} style={{ color: showComparison ? 'var(--accent)' : 'var(--text-muted)' }} />
               </div>
             )}
             <div className="flex items-center gap-2 p-2 rounded-lg transition-colors cursor-pointer" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', color: 'var(--accent)' }} onClick={() => setIsDark(!isDark)}>
@@ -819,7 +825,7 @@ export default function App() {
                 </div>
               </div>
 
-              {comparisonList.length > 0 && comparisonResults.some(r => r !== null) && (
+              {showComparison && comparisonList.length > 0 && comparisonResults.some(r => r !== null) && (
                 <div className="space-y-6">
                   <div className="flex justify-between items-end px-2">
                     <h2 className="text-[10px] font-mono tracking-[0.5em] uppercase" style={{ color: 'var(--text-secondary)' }}>Сравнение облигаций</h2>
