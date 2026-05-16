@@ -905,6 +905,7 @@ export default function App() {
             const bondIsin = selectedBond?.ISIN || '—';
 
             return (
+              <>
               <div style={{ fontFamily: "'Inter', sans-serif", color: '#1a1a1c', background: 'white' }}>
                 {/* Report Header */}
                 <div style={{ borderBottom: '2px solid #f97316', paddingBottom: 12, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
@@ -1029,6 +1030,69 @@ export default function App() {
                   <span>ALZA // ОБЛИГАЦИОННЫЙ АРБИТРАЖ</span>
                 </div>
               </div>
+
+              {comparisonList.length > 0 && comparisonResults.some(r => r !== null) && (
+                <div className="print-page-break" style={{ pageBreakBefore: 'always', fontFamily: "'Inter', sans-serif", color: '#1a1a1c', background: 'white', marginTop: 32 }}>
+                  <div style={{ borderBottom: '2px solid #f97316', paddingBottom: 12, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                    <div>
+                      <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.03em', color: '#1a1a1c' }}>ОБЛИГАЦИОННЫЙ АРБИТРАЖ</div>
+                      <div style={{ fontSize: 11, color: '#888', marginTop: 2, letterSpacing: '0.05em' }}>СРАВНЕНИЕ ОБЛИГАЦИЙ</div>
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 10, color: '#999' }}>
+                      <div>{dateStr}</div>
+                      <div style={{ marginTop: 2 }}>ИСТОЧНИК: MOEX</div>
+                    </div>
+                  </div>
+
+                  <table style={{ width: '100%', fontSize: 10, borderCollapse: 'collapse', marginTop: 16 }}>
+                    <thead>
+                      <tr style={{ background: '#f5f5f5', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#888' }}>
+                        <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>Метрика</th>
+                        {comparisonList.map((entry, ci) => {
+                          const res = comparisonResults[ci];
+                          if (!res) return null;
+                          return (
+                            <th key={entry.id} style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                              <div style={{ fontWeight: 700, color: '#1a1a1c', fontSize: 11 }}>{entry.bond.SHORTNAME || entry.bond.SECID}</div>
+                              <div style={{ fontSize: 8, color: '#999', marginTop: 2 }}>{entry.bond.ISIN}</div>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { label: 'Тип', render: (_: any, ci: number) => getBondTypeLabel(comparisonList[ci].bond.BONDTYPE, comparisonList[ci].bond.BONDSUBTYPE) || '—' },
+                        { label: 'Цена, %', render: (_: any, ci: number) => comparisonList[ci].params.pricePercent.toFixed(2) },
+                        { label: 'Купон, %', render: (_: any, ci: number) => `${comparisonList[ci].params.couponRate.toFixed(2)}%` },
+                        { label: 'Выплат/год', render: (_: any, ci: number) => `${comparisonList[ci].params.couponFrequency}` },
+                        { label: 'Дней до погаш.', render: (r: any) => r ? `${r.daysToMaturity}` : '—' },
+                        { label: 'Тек. доходность', render: (r: any) => r ? `${r.currentYield.toFixed(2)}%` : '—' },
+                        { label: 'YTM', render: (r: any) => r ? `${r.isFloatingCoupon ? '~' : ''}${r.ytm.toFixed(2)}%` : '—' },
+                        { label: 'NET доходность', render: (r: any) => r ? `${r.netYield.toFixed(2)}%` : '—' },
+                        { label: 'Окупаемость', render: (r: any) => r ? (r.paybackMonths < 0 ? 'Не окупается' : r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`) : '—' },
+                        { label: 'Кол-во', render: (r: any) => r ? `${r.bondCount} шт.` : '—' },
+                        { label: 'Чистая прибыль', render: (r: any) => r ? `${r.netProfit >= 0 ? '+' : ''}${r.netProfit.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '—' },
+                      ].map(row => (
+                        <tr key={row.label} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                          <td style={{ padding: '8px 12px', fontWeight: 600, fontSize: 9, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{row.label}</td>
+                          {comparisonResults.map((r, ci) => (
+                            <td key={ci} style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 11, color: row.label === 'NET доходность' ? '#f97316' : '#1a1a1c' }}>
+                              {row.render(r, ci)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <div style={{ borderTop: '1px solid #eee', paddingTop: 12, marginTop: 20, fontSize: 9, color: '#aaa', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Сгенерировано {dateStr}</span>
+                    <span>ALZA // ОБЛИГАЦИОННЫЙ АРБИТРАЖ</span>
+                  </div>
+                </div>
+              )}
+              </>
             );
           })()}
         </div>
