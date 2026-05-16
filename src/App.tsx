@@ -903,7 +903,7 @@ export default function App() {
 
         {/* Print Report */}
         <div id="print-report">
-          {results && (() => {
+          {!showComparison && results && (() => {
             const r = results;
             const now = new Date();
             const dateStr = now.toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -1037,7 +1037,7 @@ export default function App() {
                 </div>
               </div>
 
-              {comparisonList.length > 0 && comparisonResults.some(r => r !== null) && (
+              {showComparison && comparisonList.length > 0 && comparisonResults.some(r => r !== null) && (
                 <div className="print-page-break" style={{ pageBreakBefore: 'always', fontFamily: "'Inter', sans-serif", color: '#1a1a1c', background: 'white', marginTop: 32 }}>
                   <div style={{ borderBottom: '2px solid #f97316', paddingBottom: 12, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                     <div>
