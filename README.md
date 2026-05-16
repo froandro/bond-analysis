@@ -39,22 +39,123 @@
 - **Таблица** — каждая выплата с разбивкой
 - **Кнопка PDF** — сохранить отчёт в виде печатного документа
 
-## Быстрый старт
+## 🖥️ Деплой на VPS
+
+Инструкция для тех, кто впервые настраивает VPS. Всё делается через терминал (SSH).
+
+### Шаг 1. Подключиться к VPS
 
 ```bash
+ssh root@ip-адрес-вашего-сервера
+```
+
+Введи пароль, который дал хостинг-провайдер.
+
+### Шаг 2. Установить Node.js
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+Проверь, что установилось:
+
+```bash
+node -v   # должно показать v20.x.x
+npm -v    # должно показать 10.x.x
+```
+
+### Шаг 3. Забрать проект с GitHub
+
+```bash
+git clone https://github.com/froandro/bond-analysis.git
+cd bond-analysis
+```
+
+### Шаг 4. Установить зависимости и собрать
+
+```bash
+npm install
+npm run build
+```
+
+Готовый сайт появится в папке `dist`.
+
+### Шаг 5. Запустить (навсегда)
+
+```bash
+npm install -g pm2
+pm2 serve dist 3000 --name bond-analysis
+pm2 save
+pm2 startup
+```
+
+Вторая команда `pm2 startup` покажет тебе ещё одну команду — её тоже нужно выполнить (она добавляет автозапуск при перезагрузке сервера).
+
+Сайт будет доступен по адресу `http://ip-адрес-вашего-сервера:3000`.
+
+### Шаг 6. Подключить домен и HTTPS (рекомендуется)
+
+```bash
+sudo apt install -y nginx
+```
+
+Создай файл конфигурации:
+
+```bash
+sudo nano /etc/nginx/sites-available/bond-analysis
+```
+
+Вставь туда (замени `your-domain.com` на свой домен):
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+Включи сайт и перезагрузи Nginx:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/bond-analysis /etc/nginx/sites-enabled/
+sudo nginx -t          # проверить конфиг
+sudo systemctl reload nginx
+```
+
+Теперь сайт работает на 80-м порту — можно открывать по домену без указания порта.
+
+**HTTPS за 2 минуты (Let's Encrypt):**
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d your-domain.com
+```
+
+Введи email, согласись с условиями — и всё, сайт на HTTPS.
+
+### Если что-то пошло не так
+
+Проверь, что порты 80 и 3000 открыты в фаерволле твоего хостинга (обычно это личный кабинет провайдера → файрволл или security group).
+
+## 🖥️ Запуск локально (на своём ПК)
+
+Если хочешь просто посмотреть, как работает:
+
+```bash
+git clone https://github.com/froandro/bond-analysis.git
+cd bond-analysis
 npm install
 npm run dev
 ```
 
-Открой http://localhost:3000
-
-## Сборка
-
-```bash
-npm run build
-```
-
-Готовые файлы в папке `dist` — их можно залить на любой хостинг.
+Открой в браузере http://localhost:3000.
 
 ## Технологии
 
