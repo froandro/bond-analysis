@@ -16,6 +16,11 @@ You buy a bond and want to know its real return — not just the coupon bid/ask,
 - **Cash flow chart** — month by month
 - **Detailed payment schedule** — every single payment
 
+## Screenshots
+
+![Main screen](screenshots/183037.png?raw=true)
+![Calculation results](screenshots/183103.png?raw=true)
+
 ## How to use
 
 ### 1. Find a bond
