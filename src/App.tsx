@@ -64,6 +64,14 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isDark, setIsDark] = useState(true);
   const [showComparison, setShowComparison] = useState(false);
+  const [notification, setNotification] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (notification) {
+      const t = setTimeout(() => setNotification(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [notification]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
@@ -117,7 +125,13 @@ export default function App() {
     try {
       const secId = String(bond.secid || bond.SECID || '');
 
-      const boardsList = await fetchBondBoards(secId);
+      const [boardsList, bzPromise] = await Promise.all([
+        fetchBondBoards(secId),
+        fetchBondization(secId).catch(bzErr => {
+          console.warn('Bondization fetch failed:', bzErr);
+          return { amortizations: [], coupons: [] };
+        })
+      ]);
       let targetBoard = String(bond.primary_boardid || bond.BOARDID || '');
       const preferred = MOEX_BOARDS.find(b => boardsList.includes(b));
       if (preferred) targetBoard = preferred;
@@ -125,15 +139,9 @@ export default function App() {
 
       const { securities: secData, marketdata: marketData } = await fetchBondDetails(secId, targetBoard);
 
-      let amortizationData: Record<string, unknown>[] = [];
-      let couponSchedule: MoexCoupon[] = [];
-      try {
-        const bzData = await fetchBondization(secId);
-        amortizationData = bzData.amortizations;
-        couponSchedule = bzData.coupons;
-      } catch (bzErr) {
-        console.warn('Bondization fetch failed:', bzErr);
-      }
+      const bzData = bzPromise;
+      const amortizationData = bzData.amortizations;
+      const couponSchedule = bzData.coupons;
 
       if (!secData || Object.keys(secData).length === 0) {
         throw new Error('Security details not found');
@@ -196,7 +204,7 @@ export default function App() {
 
     } catch (e) {
       console.error('Selection error:', e);
-      alert('\u0414\u0430\u043D\u043D\u044B\u0435 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u044B \u0438\u043B\u0438 \u043E\u0431\u043B\u0438\u0433\u0430\u0446\u0438\u044F \u043D\u0435 \u0442\u043E\u0440\u0433\u0443\u0435\u0442\u0441\u044F.');
+      setNotification('Данные не найдены или облигация не торгуется.');
     } finally {
       setIsLoading(false);
     }
@@ -334,6 +342,11 @@ export default function App() {
       </header>
 
       <main className="flex-1 grid grid-cols-1 xl:grid-cols-12 gap-0 overflow-hidden">
+        {notification && (
+          <div className="fixed top-6 right-6 z-[200] px-5 py-3 rounded-xl text-sm font-bold shadow-2xl animate-slide-down" style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
+            {notification}
+          </div>
+        )}
         
         {/* Input Sidebar */}
         <aside className="xl:col-span-3 p-8 space-y-12 overflow-y-auto max-h-[calc(100vh-140px)] border-r" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
@@ -403,6 +416,11 @@ export default function App() {
                         </div>
                       </button>
                     ))}
+                  </div>
+                )}
+                {!isLoading && bondSearch.length >= 3 && searchResults.length === 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-2 rounded-xl shadow-xl z-50 p-6 text-center text-[11px] font-bold" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', color: 'var(--text-muted)' }}>
+                    Ничего не найдено
                   </div>
                 )}
               </div>

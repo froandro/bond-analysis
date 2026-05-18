@@ -116,9 +116,11 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   const couponCountVal = events.filter(e => e.type === 'coupon').length;
   let totalNetCoupons = 0;
 
-  const cashFlows: number[] = [-dirtyPriceVal];
+  const perBondCommission = commissionVal / bondCountVal;
+
+  const cashFlows: number[] = [-(dirtyPriceVal + perBondCommission)];
   const cfDates: Date[] = [purchase];
-  const netCashFlows: number[] = [-dirtyPriceVal];
+  const netCashFlows: number[] = [-(dirtyPriceVal + perBondCommission)];
 
   let currentNominal = nominal;
   let ytmNkdUsedForTax = nkd;
@@ -201,10 +203,10 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   }
 
   let ytmVal = calculateYTM(cashFlows, cfDates, purchase);
-  if (isNaN(ytmVal) || ytmVal < -99) ytmVal = 0;
+  if (isNaN(ytmVal) || ytmVal < -99) ytmVal = NaN;
 
   let netYieldVal = calculateYTM(netCashFlows, cfDates, purchase);
-  if (isNaN(netYieldVal) || netYieldVal < -99) netYieldVal = 0;
+  if (isNaN(netYieldVal) || netYieldVal < -99) netYieldVal = NaN;
 
   const capitalGainVal = (nominal * bondCountVal) - (cleanPriceVal * bondCountVal);
   const finalAmountVal = (nominal * bondCountVal) + totalNetCoupons;
@@ -213,7 +215,7 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   const firstCoupon = events.find(e => e.type === 'coupon')?.value ?? (nominal * (couponRate / 100) / couponFreqVal);
   const netCouponPerPeriod = firstCoupon * (1 - (taxRate / 100));
   const annualNetCoupon = netCouponPerPeriod * couponFreqVal * bondCountVal;
-  const paybackMonthsVal = !paybackDateVal ? null : (totalOverpaymentVal <= 0 ? 0 : (annualNetCoupon > 0 ? (totalOverpaymentVal / (annualNetCoupon / 12)) : getDaysBetween(purchase, new Date(paybackDateVal)) / 30.44));
+  const paybackMonthsVal = !paybackDateVal ? null : (totalOverpaymentVal <= 0 ? 0 : getDaysBetween(purchase, new Date(paybackDateVal)) / 30.44);
 
   return {
     cleanPrice: cleanPriceVal,

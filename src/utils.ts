@@ -114,7 +114,7 @@ export function isFloatingCoupon(
       name.includes('FLOAT') || name.includes('VARIABLE')) return true;
 
   if (coupons && coupons.length > 1) {
-    const vals = coupons.map(c => c.value).filter(v => v > 0);
+    const vals = coupons.map(c => c.value).filter((v): v is number => v !== undefined && v > 0);
     if (vals.length > 1) {
       const min = Math.min(...vals);
       const max = Math.max(...vals);
@@ -141,7 +141,7 @@ export function getBondTypeLabel(bondType?: string, bondSubType?: string): strin
 }
 
 export function calculateYTM(cashFlows: number[], dates: Date[], purchaseDate: Date) {
-  if (cashFlows.length < 2) return 0;
+  if (cashFlows.length < 2) return NaN;
 
   const npv = (rate: number) => {
     let sum = 0;
@@ -158,14 +158,14 @@ export function calculateYTM(cashFlows: number[], dates: Date[], purchaseDate: D
   let npvHigh = npv(high);
 
   if (npvLow * npvHigh > 0) {
-    for (let mult of [3, 10, 50]) {
+    for (const mult of [3, 10, 50]) {
       low = -mult * 100;
       high = mult * 100;
       npvLow = npv(low);
       npvHigh = npv(high);
       if (npvLow * npvHigh < 0) break;
     }
-    if (npvLow * npvHigh > 0) return 0;
+    if (npvLow * npvHigh > 0) return NaN;
   }
 
   for (let iter = 0; iter < 500; iter++) {
