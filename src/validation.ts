@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import type { BondData, MoexCoupon, SearchResult } from './types';
 
 const optionalNumber = z.number().optional().nullable().transform(v => v ?? undefined);
 const optionalString = z.string().optional().nullable().transform(v => v ?? undefined);
@@ -38,6 +37,12 @@ export const BondDataSchema = z.object({
   BONDTYPE: optionalString,
   BONDSUBTYPE: optionalString,
   COUPONTYPE: optionalString,
+  OFFERDATE: optionalString,
+  OFFERPRICE: optionalNumber,
+  CALLOPTIONDATE: optionalString,
+  PUTOPTIONDATE: optionalString,
+  BUYBACKDATE: optionalString,
+  BUYBACKPRICE: optionalNumber,
   ACTUAL_PRICE: optionalNumber,
   PREVPRICE: optionalNumber,
   LAST: optionalNumber,
@@ -59,20 +64,24 @@ export const SearchResultSchema = z.object({
   type: optionalString,
 }).passthrough();
 
-export function parseBondData(raw: Record<string, unknown>): BondData | null {
+export type ParsedBondData = z.infer<typeof BondDataSchema>;
+export type ParsedSearchResult = z.infer<typeof SearchResultSchema>;
+export type ParsedMoexCoupon = z.infer<typeof MoexCouponSchema>;
+
+export function parseBondData(raw: Record<string, unknown>): ParsedBondData | null {
   const result = BondDataSchema.safeParse(raw);
   if (!result.success) return null;
-  return result.data as BondData;
+  return result.data;
 }
 
-export function parseSearchResult(raw: Record<string, unknown>): SearchResult | null {
+export function parseSearchResult(raw: Record<string, unknown>): ParsedSearchResult | null {
   const result = SearchResultSchema.safeParse(raw);
   if (!result.success) return null;
-  return result.data as SearchResult;
+  return result.data;
 }
 
-export function parseMoexCoupon(raw: Record<string, unknown>): MoexCoupon | null {
+export function parseMoexCoupon(raw: Record<string, unknown>): ParsedMoexCoupon | null {
   const result = MoexCouponSchema.safeParse(raw);
   if (!result.success) return null;
-  return result.data as MoexCoupon;
+  return result.data;
 }

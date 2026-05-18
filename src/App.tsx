@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from 'react';
 import {
   Search,
   Download,
@@ -25,15 +25,15 @@ import type { BondData, Results, MoexCoupon, CalcParams, ComparisonEntry } from 
 import {
   TOOLTIPS, normalizeCurrency, getCurrencySymbol, clamp,
   isFloatingCoupon, getBondTypeLabel,
-  getDefaultInvestment, convertInvestment
+  convertInvestment
 } from './utils';
 import {
   MOEX_BOARDS, searchBonds, fetchBondBoards, fetchBondDetails, fetchBondization
 } from './api/moex';
 import { computeResults, extractBondParams } from './calc';
-import { parseBondData, parseSearchResult } from './validation';
+import { parseBondData, parseSearchResult, type ParsedSearchResult } from './validation';
 
-function Tooltip({ children, text }: { children: React.ReactNode; text: string }) {
+function Tooltip({ children, text }: { children: ReactNode; text: string }) {
   return (
     <div className="relative inline-block group">
       {children}
@@ -100,7 +100,7 @@ export default function App() {
         const type = String(s.type || '').toLowerCase();
         return bondGroups.includes(group) || bondTypes.includes(type);
       });
-      setSearchResults(filtered.map(r => parseSearchResult(r)).filter((r): r is Record<string, unknown> => r !== null));
+      setSearchResults(filtered.map(r => parseSearchResult(r)).filter((r): r is ParsedSearchResult => r !== null));
     } catch (e) {
       console.error('Search error:', e);
     } finally {
@@ -162,24 +162,14 @@ export default function App() {
         if (firstKey) cache.delete(firstKey);
       }
 
-      const nom = Number(Number(fullBond.FACEVALUE || fullBond.NOMINAL || fullBond.INITIALFACEVALUE || 1000).toFixed(2));
-      const priceVal = Number(Number(marketData.LAST || marketData.WAPRICE || marketData.LCURRENTPRICE || marketData.LCLOSEPRICE || fullBond.PREVPRICE || 100).toFixed(2));
-      const frequency = Math.round(365 / (Number(fullBond.COUPONPERIOD) || 91)) || 4;
-
-      let couponVal = Number(fullBond.COUPONPERCENT || 0);
-      const couponValueAbs = Number(fullBond.COUPONVALUE || 0);
-
-      if (couponVal === 0 && couponValueAbs > 0 && nom > 0) {
-        couponVal = (couponValueAbs / nom) * (frequency || 1) * 100;
-      }
-
-      setNominal(nom);
-      setPricePercent(priceVal);
-      setNkd(Number(Number(fullBond.ACCRUEDINT || 0).toFixed(2)));
-      setCouponRate(couponVal);
-      setCouponFrequency(frequency);
-      setMaturityDate(fullBond.MATDATE || fullBond.MATURITYDATE || '');
-      setNextCouponDate(fullBond.NEXTCOUPON || '');
+      const bp = extractBondParams(fullBond);
+      setNominal(bp.nominal);
+      setPricePercent(bp.pricePercent);
+      setNkd(bp.nkd);
+      setCouponRate(bp.couponRate);
+      setCouponFrequency(bp.couponFrequency);
+      setMaturityDate(bp.maturityDate);
+      setNextCouponDate(bp.nextCouponDate);
 
       let actualCurrency = String(fullBond.FACEUNIT || marketData.CURRENCYID || fullBond.CURRENCYID || fullBond.CURRENCY || '');
 
@@ -200,6 +190,8 @@ export default function App() {
       const secIdUpper = (secId || '').toUpperCase();
       if (secIdUpper.startsWith('SU') || fullBond.BONDSUBTYPE === 'GOVERNMENT') {
         setTaxRate(prev => prev !== 0 ? 0 : prev);
+      } else {
+        setTaxRate(prev => prev === 0 ? 13 : prev);
       }
 
     } catch (e) {
@@ -221,6 +213,70 @@ export default function App() {
     comparisonList.map(entry => computeResults(entry.bond, { ...calcParams, ...entry.params })),
     [comparisonList, investment, taxRate, commission, purchaseDate]
   );
+
+  const normDate = (raw?: string) => raw ? new Date(raw).toISOString().split('T')[0] : null;
+  const isAfterPurchase = (d: string | null) => d && results && new Date(d) >= new Date(purchaseDate);
+
+  const offerDateNorm = normDate(selectedBond?.OFFERDATE);
+  const hasOffer = isAfterPurchase(offerDateNorm);
+  const callDateNorm = normDate(selectedBond?.CALLOPTIONDATE);
+  const hasCall = isAfterPurchase(callDateNorm);
+  const putDateNorm = normDate(selectedBond?.PUTOPTIONDATE);
+  const hasPut = isAfterPurchase(putDateNorm);
+
+  const augmentedCashFlows = useMemo(() => {
+    if (!results) return [];
+    let copy = [...results.cashFlows];
+
+    const addEvent = (dateNorm: string | null, cond: boolean, type: string) => {
+      if (!cond || !dateNorm) return;
+      const idx = copy.findIndex(cf => cf.date >= dateNorm);
+      const prevCumul = idx > 0 ? copy[idx - 1].cumulative : 0;
+      copy.splice(idx < 0 ? copy.length : idx, 0, {
+        date: dateNorm,
+        amount: 0, cumulative: prevCumul, overpayment: results.totalOverpayment, flow: 0, type, gross: 0, tax: 0
+      });
+    };
+
+    addEvent(offerDateNorm, hasOffer, 'OFFER');
+    addEvent(callDateNorm, hasCall, 'CALL');
+    addEvent(putDateNorm, hasPut, 'PUT');
+
+    if (results.paybackDate) {
+      const pbIdx = copy.findIndex(cf => cf.date >= results.paybackDate);
+      const pbCumul = pbIdx > 0 ? copy[pbIdx - 1].cumulative : 0;
+      copy.splice(pbIdx < 0 ? copy.length : pbIdx, 0, {
+        date: results.paybackDate,
+        amount: 0, cumulative: pbCumul, overpayment: results.totalOverpayment, flow: 0, type: 'PAYBACK', gross: 0, tax: 0,
+        isPaybackPoint: true
+      } as Results['cashFlows'][number] & { isPaybackPoint: boolean });
+    }
+
+    return copy;
+  }, [results, hasOffer, offerDateNorm, hasCall, callDateNorm, hasPut, putDateNorm]);
+
+  const chartData = useMemo(() => {
+    if (!results) return [];
+    return results.cashFlows.map(cf => ({ ...cf, ts: new Date(cf.date).getTime() }));
+  }, [results]);
+
+  const chartTicks = useMemo<number[]>(() => {
+    if (chartData.length === 0) return [];
+    const base = chartData.map(d => d.ts);
+    if (results?.paybackDate) base.push(new Date(results.paybackDate).getTime());
+    if (selectedBond?.OFFERDATE) base.push(new Date(selectedBond.OFFERDATE).getTime());
+    if (selectedBond?.CALLOPTIONDATE) base.push(new Date(selectedBond.CALLOPTIONDATE).getTime());
+    if (selectedBond?.PUTOPTIONDATE) base.push(new Date(selectedBond.PUTOPTIONDATE).getTime());
+    const sorted = Array.from<number>(new Set(base)).sort((a, b) => a - b);
+    if (sorted.length <= 8) return sorted;
+    const step = (sorted.length - 2) / 6;
+    const picks: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const idx = 1 + Math.round(step * i);
+      if (idx < sorted.length - 1) picks.push(sorted[idx]);
+    }
+    return [sorted[0], ...picks, sorted[sorted.length - 1]];
+  }, [chartData, results?.paybackDate, selectedBond?.OFFERDATE, selectedBond?.CALLOPTIONDATE, selectedBond?.PUTOPTIONDATE]);
 
   const resultsRef = useRef<HTMLDivElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -301,9 +357,9 @@ export default function App() {
 
                 {searchResults.length > 0 && (
                   <div className="absolute top-full left-0 right-0 mt-2 rounded-xl shadow-xl z-50 divide-y overflow-hidden" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
-                    {searchResults.slice(0, 15).map((bond) => (
+                    {searchResults.slice(0, 15).map((bond, i) => (
                       <button 
-                        key={bond.secid || bond.SECID}
+                        key={String(bond.secid || bond.SECID || i)}
                         onClick={() => selectBond(bond)}
                         className="w-full px-4 py-3 text-left hover:opacity-80 flex flex-col gap-0.5 transition-opacity"
                       >
@@ -478,7 +534,7 @@ export default function App() {
                       { label: '\u0422\u0435\u043A. \u0434\u043E\u0445\u043E\u0434\u043D\u043E\u0441\u0442\u044C', render: (r: Results | null) => r ? `${r.currentYield.toFixed(2)}%` : '\u2014' },
                       { label: 'YTM', render: (r: Results | null) => r ? `${r.isFloatingCoupon ? '~' : ''}${r.ytm.toFixed(2)}%` : '\u2014' },
                       { label: 'NET \u0434\u043E\u0445\u043E\u0434\u043D\u043E\u0441\u0442\u044C', render: (r: Results | null) => r ? `${r.netYield.toFixed(2)}%` : '\u2014', highlight: true },
-                      { label: '\u041E\u043A\u0443\u043F\u0430\u0435\u043C\u043E\u0441\u0442\u044C', render: (r: Results | null) => r ? (r.paybackMonths < 0 ? '\u041D\u0435 \u043E\u043A\u0443\u043F\u0430\u0435\u0442\u0441\u044F' : r.totalOverpayment <= 0 ? '\u0421\u0440\u0430\u0437\u0443' : `${r.paybackMonths.toFixed(1)} \u043C\u0435\u0441.`) : '\u2014' },
+                      { label: '\u041E\u043A\u0443\u043F\u0430\u0435\u043C\u043E\u0441\u0442\u044C', render: (r: Results | null) => r ? (r.paybackMonths === null ? '\u041D\u0435 \u043E\u043A\u0443\u043F\u0430\u0435\u0442\u0441\u044F' : r.totalOverpayment <= 0 ? '\u0421\u0440\u0430\u0437\u0443' : `${r.paybackMonths.toFixed(1)} \u043C\u0435\u0441.`) : '\u2014' },
                       { label: '\u0427\u0438\u0441\u0442\u0430\u044F \u043F\u0440\u0438\u0431\u044B\u043B\u044C', render: (r: Results | null) => r ? `${r.netProfit >= 0 ? '+' : ''}${r.netProfit.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '\u2014', profit: true },
                     ].map(row => (
                       <tr key={row.label} className="hover:opacity-80 transition-opacity" style={{ borderColor: 'var(--border-color)' }}>
@@ -519,7 +575,7 @@ export default function App() {
                           <div className="flex flex-col gap-2">
                             <div className="flex items-center gap-3">
                                 <span className="text-[10px] font-mono tracking-[0.5em] uppercase border-b pb-1" style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}>
-                                 {selectedBond.SHORTNAME || selectedBond.SECNAME || selectedBond.SECID}
+                                  {selectedBond.SHORTNAME || selectedBond.SECID}
                                </span>
                                 <span className="text-[10px] font-bold text-orange-500 border border-orange-500/30 rounded px-2 py-0.5">
                                   {getBondTypeLabel(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE) || '--'}
@@ -532,8 +588,26 @@ export default function App() {
                                    style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
                                    + Сравнить
                                  </button>
-                               )}
-                             </div>
+                             )}
+                             {selectedBond?.OFFERDATE && (
+                               <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-bold" style={{ backgroundColor: 'rgba(168,85,247,0.1)', color: '#a855f7' }}>
+                                 <Info size={12} />
+                                 Оферта {new Date(selectedBond.OFFERDATE).toLocaleDateString('ru-RU')}
+                               </div>
+                             )}
+                             {selectedBond?.CALLOPTIONDATE && (
+                               <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-bold" style={{ backgroundColor: 'rgba(59,130,246,0.1)', color: '#3b82f6' }}>
+                                 <Info size={12} />
+                                 Колл {new Date(selectedBond.CALLOPTIONDATE).toLocaleDateString('ru-RU')}
+                               </div>
+                             )}
+                             {selectedBond?.PUTOPTIONDATE && (
+                               <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-bold" style={{ backgroundColor: 'rgba(34,197,94,0.1)', color: '#22c55e' }}>
+                                 <Info size={12} />
+                                 Пут {new Date(selectedBond.PUTOPTIONDATE).toLocaleDateString('ru-RU')}
+                               </div>
+                             )}
+                          </div>
                             {isFloatingCoupon(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE, selectedBond.COUPONTYPE, selectedBond.SHORTNAME, selectedBond.coupons) && (
                               <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-bold" style={{ backgroundColor: 'rgba(234,179,8,0.1)', color: '#eab308' }}>
                                 <Info size={12} />
@@ -578,7 +652,7 @@ export default function App() {
                     <Tooltip text={TOOLTIPS.payback}>
                       <div className="space-y-1 cursor-help">
                         <span className="text-[10px] uppercase font-bold tracking-widest" style={{ color: 'var(--text-muted)' }}>Окупаемость</span>
-                         <p className="text-2xl font-bold" style={{ color: 'var(--text-secondary)' }}>{results.paybackMonths < 0 ? "Не окупается" : results.totalOverpayment <= 0 ? "Сразу" : `${results.paybackMonths.toFixed(1)} мес.`}</p>
+                                                   <p className="text-2xl font-bold" style={{ color: 'var(--text-secondary)' }}>{results.paybackMonths === null ? "Не окупается" : results.totalOverpayment <= 0 ? "Сразу" : `${results.paybackMonths.toFixed(1)} мес.`}</p>
                       </div>
                     </Tooltip>
                     <Tooltip text={TOOLTIPS.netProfit}>
@@ -643,7 +717,7 @@ export default function App() {
                 </div>
                 <div className="h-[450px] min-h-[450px] w-full rounded-[40px] border p-0 relative overflow-hidden group shadow-2xl" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
                   <ResponsiveContainer width="100%" height="100%" minHeight={1} minWidth={1} debounce={50}>
-                    <ComposedChart data={results.cashFlows} margin={{ top: 40, right: 40, left: 20, bottom: 40 }}>
+                    <ComposedChart data={chartData} margin={{ top: 40, right: 40, left: 20, bottom: 40 }}>
                       <defs>
                         <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#f97316" stopOpacity={0.15}/>
@@ -652,7 +726,10 @@ export default function App() {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.03)" />
                       <XAxis 
-                        dataKey="date" 
+                        dataKey="ts" 
+                        type="number"
+                        domain={['dataMin', 'dataMax']}
+                        ticks={chartTicks}
                         axisLine={false} 
                         tickLine={false} 
                         tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.4)' }}
@@ -661,7 +738,6 @@ export default function App() {
                           return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`;
                         }}
                         dy={10}
-                        interval="preserveStartEnd"
                         height={40}
                       />
                       <YAxis 
@@ -684,13 +760,20 @@ export default function App() {
                         contentStyle={{ backgroundColor: '#161618', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', boxShadow: '0 10px 30px rgba(0,0,0,0.4)', color: '#fff', padding: '12px' }}
                         itemStyle={{ padding: '4px 0', color: '#fff', fontSize: '11px' }}
                         labelStyle={{ color: '#f97316', fontWeight: 'bold', fontSize: '12px', marginBottom: '8px' }}
+                        labelFormatter={(ts: number) => {
+                          const d = new Date(ts);
+                          return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getFullYear()).slice(2)}`;
+                        }}
                         formatter={(value: number, name: string, props: { payload?: { type?: string } }) => {
                           const type = props?.payload?.type || '';
                           const typeLabel: Record<string, string> = {
                             'OPEN': 'Открытие позиции',
                             'COUPON': 'Выплата купона',
                             'PAYBACK': 'Точка окупаемости',
-                            'MATURITY': 'Погашение'
+                            'MATURITY': 'Погашение',
+                            'OFFER': 'Оферта',
+                            'CALL': 'Колл',
+                            'PUT': 'Пут'
                           };
                           if (name === 'cumulative') {
                             return [`${Number(value).toLocaleString('ru-RU')} ${getCurrencySymbol(currency)}`, 'Накоплено'];
@@ -705,7 +788,7 @@ export default function App() {
                       {results.paybackDate && (
                         <ReferenceLine 
                           yId="left"
-                          x={results.paybackDate} 
+                          x={new Date(results.paybackDate).getTime()} 
                           stroke="#ef4444" 
                           strokeDasharray="3 3"
                           label={{ 
@@ -717,19 +800,51 @@ export default function App() {
                           }} 
                         />
                       )}
-                      <ReferenceLine 
-                        yId="left" 
-                        y={Math.max(0, results.totalOverpayment)} 
-                        stroke="rgba(239, 68, 68, 0.2)" 
-                        strokeDasharray="5 5" 
-                        label={{ 
-                          value: 'ПОРОГ ОКУПАЕМОСТИ', 
-                          position: 'insideRight', 
-                          fill: '#ef4444', 
-                          fontSize: 8,
-                          opacity: 0.3
-                        }} 
-                      />
+                      {selectedBond?.OFFERDATE && (
+                        <ReferenceLine 
+                          yId="left"
+                          x={new Date(selectedBond.OFFERDATE).getTime()}
+                          stroke="#a855f7" 
+                          strokeDasharray="6 3"
+                          label={{ 
+                            value: 'ОФЕРТА', 
+                            position: 'top', 
+                            fill: '#a855f7', 
+                            fontSize: 9, 
+                            fontWeight: 'bold' 
+                          }} 
+                        />
+                      )}
+                      {selectedBond?.CALLOPTIONDATE && (
+                        <ReferenceLine 
+                          yId="left"
+                          x={new Date(selectedBond.CALLOPTIONDATE).getTime()}
+                          stroke="#3b82f6" 
+                          strokeDasharray="6 3"
+                          label={{ 
+                            value: 'КОЛЛ', 
+                            position: 'top', 
+                            fill: '#3b82f6', 
+                            fontSize: 9, 
+                            fontWeight: 'bold' 
+                          }} 
+                        />
+                      )}
+                      {selectedBond?.PUTOPTIONDATE && (
+                        <ReferenceLine 
+                          yId="left"
+                          x={new Date(selectedBond.PUTOPTIONDATE).getTime()}
+                          stroke="#22c55e" 
+                          strokeDasharray="6 3"
+                          label={{ 
+                            value: 'ПУТ', 
+                            position: 'top', 
+                            fill: '#22c55e', 
+                            fontSize: 9, 
+                            fontWeight: 'bold' 
+                          }} 
+                        />
+                      )}
                       <Bar 
                         yId="right"
                         dataKey="flow" 
@@ -836,7 +951,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y" style={{ borderColor: 'var(--border-color)' }}>
-                      {results.cashFlows.map((row, i) => {
+                      {augmentedCashFlows.map((row, i) => {
                         if (row.type === 'OPEN') return (
                           <tr key={i} className="transition-colors" style={{ backgroundColor: 'var(--bg-card)' }}>
                             <td className="px-8 py-5 italic" style={{ color: 'var(--text-muted)' }}>{row.date}</td>
@@ -851,13 +966,21 @@ export default function App() {
                         const labels: Record<string, string> = {
                           'COUPON': 'ВЫПЛАТА КУПОНА',
                           'AMORTIZATION': 'АМОРТИЗАЦИЯ',
-                          'MATURITY': 'ГАСЯЩИЙ ПЛАТЕЖ'
+                          'MATURITY': 'ГАСЯЩИЙ ПЛАТЕЖ',
+                          'OFFER': 'ОФЕРТА',
+                          'CALL': 'КОЛЛ',
+                          'PUT': 'ПУТ',
+                          'PAYBACK': 'ТОЧКА ОКУПАЕМОСТИ'
                         };
 
                         const colors: Record<string, string> = {
                           'COUPON': 'bg-orange-500/10 text-orange-500',
                           'AMORTIZATION': 'bg-blue-500/10 text-blue-400',
-                          'MATURITY': 'bg-green-500/10 text-green-400'
+                          'MATURITY': 'bg-green-500/10 text-green-400',
+                          'OFFER': 'bg-purple-500/10 text-purple-400',
+                          'CALL': 'bg-blue-500/10 text-blue-400',
+                          'PUT': 'bg-emerald-500/10 text-emerald-400',
+                          'PAYBACK': 'bg-red-500/10 text-red-400'
                         };
 
                         const formatVal = (v: number) => v.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -866,7 +989,7 @@ export default function App() {
                           <tr key={i} className="hover:opacity-80 transition-colors" style={{ borderColor: 'var(--border-color)' }}>
                             <td className="px-8 py-5 font-medium" style={{ color: 'var(--text-muted)' }}>{row.date}</td>
                             <td className="py-5">
-                              <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${colors[row.type] || ''}`} style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent)' }}>
+                              <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${colors[row.type] || 'bg-transparent text-inherit'}`}>
                                 {labels[row.type] || row.type}
                               </span>
                             </td>
@@ -949,7 +1072,7 @@ export default function App() {
                   {[
                     { label: 'Чистая доходность (NET)', value: `${r.netYield.toFixed(2)}%`, color: '#f97316' },
                     { label: 'YTM (грязная)', value: `${r.ytm.toFixed(2)}%`, color: '#1a1a1c' },
-                    { label: 'Окупаемость', value: r.paybackMonths < 0 ? 'Не окупается' : r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`, color: '#1a1a1c' },
+                    { label: 'Окупаемость', value: r.paybackMonths === null ? 'Не окупается' : r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`, color: '#1a1a1c' },
                     { label: 'Чистая прибыль', value: `+${r.netProfit.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}`, color: '#16a34a' },
                     { label: 'Общая выплата', value: `${r.finalAmount.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}`, color: '#1a1a1c' },
                     { label: 'Купонов получено', value: `${r.couponCount} шт.`, color: '#1a1a1c' },
@@ -1015,14 +1138,14 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {r.cashFlows.map((row, i) => {
-                        const labels: Record<string, string> = { 'OPEN': 'Открытие', 'COUPON': 'Купон', 'AMORTIZATION': 'Амортизация', 'MATURITY': 'Погашение' };
+                      {augmentedCashFlows.map((row, i) => {
+                         const labels: Record<string, string> = { 'OPEN': 'Открытие', 'COUPON': 'Купон', 'AMORTIZATION': 'Амортизация', 'MATURITY': 'Погашение', 'OFFER': 'Оферта', 'CALL': 'Колл', 'PUT': 'Пут', 'PAYBACK': 'Окупаемость' };
                         return (
                           <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
                             <td style={{ padding: '6px 12px', color: '#666', whiteSpace: 'nowrap' }}>{row.date}</td>
                             <td style={{ padding: '6px 12px', fontWeight: 600, whiteSpace: 'nowrap' }}>{labels[row.type] || row.type}</td>
-                            <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', fontSize: 9, color: row.flow < 0 ? '#dc2626' : '#16a34a' }}>
-                              {row.flow < 0 ? '-' : '+'}{Math.abs(row.flow).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} {getCurrencySymbol(currency)}
+                            <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', fontSize: 9, color: row.flow < 0 ? '#dc2626' : row.flow > 0 ? '#16a34a' : '#aaa' }}>
+                              {row.flow === 0 ? '—' : (row.flow < 0 ? '-' : '+') + Math.abs(row.flow).toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' ' + getCurrencySymbol(currency)}
                             </td>
                           </tr>
                         );
@@ -1080,7 +1203,7 @@ export default function App() {
                         { label: 'Тек. доходность', render: (r: Results | null) => r ? `${r.currentYield.toFixed(2)}%` : '—' },
                         { label: 'YTM', render: (r: Results | null) => r ? `${r.isFloatingCoupon ? '~' : ''}${r.ytm.toFixed(2)}%` : '—' },
                         { label: 'NET доходность', render: (r: Results | null) => r ? `${r.netYield.toFixed(2)}%` : '—' },
-                        { label: 'Окупаемость', render: (r: Results | null) => r ? (r.paybackMonths < 0 ? 'Не окупается' : r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`) : '—' },
+                        { label: 'Окупаемость', render: (r: Results | null) => r ? (r.paybackMonths === null ? 'Не окупается' : r.totalOverpayment <= 0 ? 'Сразу' : `${r.paybackMonths.toFixed(1)} мес.`) : '—' },
                         { label: 'Кол-во', render: (r: Results | null) => r ? `${r.bondCount} шт.` : '—' },
                         { label: 'Чистая прибыль', render: (r: Results | null) => r ? `${r.netProfit >= 0 ? '+' : ''}${r.netProfit.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${getCurrencySymbol(currency)}` : '—' },
                       ].map(row => (

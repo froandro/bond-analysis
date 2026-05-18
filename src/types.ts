@@ -1,17 +1,3 @@
-export interface MoexTable {
-  columns: string[];
-  data: unknown[][];
-}
-
-export interface MoexResponse {
-  securities?: MoexTable;
-  marketdata?: MoexTable;
-  boards?: MoexTable;
-  amortizations?: MoexTable;
-  coupons?: MoexTable;
-  [key: string]: unknown;
-}
-
 export interface BondData {
   SECID: string;
   ISIN: string;
@@ -24,9 +10,9 @@ export interface BondData {
   COUPONPERCENT?: number;
   MATDATE: string;
   MATURITYDATE?: string;
-  ACCRUEDINT: number;
+  ACCRUEDINT?: number;
   NEXTCOUPON: string;
-  COUPONPERIOD: number;
+  COUPONPERIOD?: number;
   CURRENCY?: string;
   CURRENCYID?: string;
   FACEUNIT?: string;
@@ -40,6 +26,12 @@ export interface BondData {
   BONDTYPE?: string;
   BONDSUBTYPE?: string;
   COUPONTYPE?: string;
+  OFFERDATE?: string;
+  OFFERPRICE?: number;
+  CALLOPTIONDATE?: string;
+  PUTOPTIONDATE?: string;
+  BUYBACKDATE?: string;
+  BUYBACKPRICE?: number;
   ACTUAL_PRICE?: number;
   PREVPRICE?: number;
   LAST?: number;
@@ -90,12 +82,11 @@ export interface Results {
   totalTaxPaid: number;
   daysToMaturity: number;
   couponCount: number;
-  paybackMonths: number;
+  paybackMonths: number | null;
   paybackDate: string | null;
   capitalGain: number;
   grossCouponTotal: number;
   isFloatingCoupon: boolean;
-  knownCouponsOnly: boolean;
   cashFlows: CashFlow[];
 }
 
@@ -123,11 +114,6 @@ export type EventType = 'coupon' | 'amortization';
 export interface CalcEvent {
   date: Date;
   type: EventType;
-  value: number;
-}
-
-export interface AmortScheduleItem {
-  date: Date;
   value: number;
 }
 

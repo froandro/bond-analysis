@@ -101,7 +101,8 @@ export function isFloatingCoupon(
   const t = (bondType || bondSubType || couponType || '').toUpperCase();
 
   // MOEX type fields explicitly indicate floating
-  if (t.includes('FLOAT') || t.includes('VARIABLE') || t.includes('CPI') || t.includes('INDEX')) return true;
+  if (t.includes('FLOAT') || t.includes('VARIABLE') || t.includes('CPI') || t.includes('INDEX') ||
+      t.includes('\u041F\u041B\u0410\u0412') || t.includes('\u041F\u0415\u0420\u0415\u041C')) return true;
 
   // MOEX type fields exist but don't indicate floating — trust MOEX classification
   if (bondType || bondSubType || couponType) return false;
@@ -109,7 +110,7 @@ export function isFloatingCoupon(
   // No MOEX type info: fallback to name + coupon variance heuristics
   const name = (shortName || '').toUpperCase();
   if (name.includes('\u041F\u041B\u0410\u0412') || name.includes('\u041F\u0415\u0420\u0415\u041C') ||
-      name.includes('\u0424\u041B\u041E\u0410\u0422') || name.includes('PK-') ||
+      name.includes('\u0424\u041B\u041E\u0410\u0422') || name.includes('PK-') || name.includes('\u041F\u041A-') ||
       name.includes('FLOAT') || name.includes('VARIABLE')) return true;
 
   if (coupons && coupons.length > 1) {

@@ -2,8 +2,8 @@ import type { BondData, CalcParams, Results, CalcEvent } from './types';
 import { getDaysBetween, calculateYTM, isFloatingCoupon, DAYS_IN_YEAR } from './utils';
 
 export function extractBondParams(bond: BondData) {
-  const nom = Number(Number(bond.FACEVALUE || bond.NOMINAL || bond.INITIALFACEVALUE || 1000).toFixed(2));
-  const priceVal = Number(Number(bond.LAST || bond.WAPRICE || bond.LCURRENTPRICE || bond.LCLOSEPRICE || bond.PREVPRICE || 100).toFixed(2));
+  const nom = Number((bond.FACEVALUE || bond.NOMINAL || bond.INITIALFACEVALUE || 1000).toFixed(2));
+  const priceVal = Number((bond.LAST || bond.WAPRICE || bond.LCURRENTPRICE || bond.LCLOSEPRICE || bond.PREVPRICE || 100).toFixed(2));
   const frequency = Math.round(DAYS_IN_YEAR / (Number(bond.COUPONPERIOD) || 91)) || 4;
   let couponVal = Number(bond.COUPONPERCENT || 0);
   const couponValueAbs = Number(bond.COUPONVALUE || 0);
@@ -13,7 +13,7 @@ export function extractBondParams(bond: BondData) {
   return {
     nominal: nom,
     pricePercent: priceVal,
-    nkd: Number(Number(bond.ACCRUEDINT || 0).toFixed(2)),
+    nkd: Number((bond.ACCRUEDINT || 0).toFixed(2)),
     couponRate: couponVal,
     couponFrequency: frequency,
     maturityDate: bond.MATDATE || bond.MATURITYDATE || '',
@@ -83,7 +83,7 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
       currentNext.setDate(currentNext.getDate() + couponPeriodDays);
       let safety = 0;
       while (currentNext <= maturity && safety < 100) {
-        const paidAmort = amortSchedule.filter(a => a.date <= currentNext).reduce((sum, a) => sum + a.value, 0);
+        const paidAmort = amortSchedule.filter(a => a.date < currentNext).reduce((sum, a) => sum + a.value, 0);
         const nominalAtDate = Math.max(0, nominal - paidAmort);
         const cVal = isFloater && lastCouponValue > 0 ? lastCouponValue : nominalAtDate * (couponRate / 100) / couponFreqVal;
         events.push({ date: new Date(currentNext), type: 'coupon', value: cVal });
@@ -121,14 +121,8 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   const netCashFlows: number[] = [-dirtyPriceVal];
 
   let currentNominal = nominal;
-  let ytmCumulativeAccum = 0;
   let ytmNkdUsedForTax = nkd;
-  const ytmTotalOverpaymentVal = (dirtyPriceVal - nominal);
-  let ytmPaybackDate: string | null = ytmTotalOverpaymentVal <= 0 ? purchase.toISOString().split('T')[0] : null;
 
-  const portCashFlows: number[] = [-totalCostWithComm];
-  const portCfDates: Date[] = [purchase];
-  const netPortCashFlows: number[] = [-totalCostWithComm];
   const portChartData: Results['cashFlows'] = [{
     date: purchase.toISOString().split('T')[0],
     amount: 0,
@@ -153,7 +147,6 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
       const taxVal = taxableAmount * (taxRate / 100);
       ytmNkdUsedForTax = Math.max(0, ytmNkdUsedForTax - cVal);
       const netCVal = cVal - taxVal;
-      ytmCumulativeAccum += netCVal;
       cashFlows.push(cVal);
       netCashFlows.push(netCVal);
       cfDates.push(event.date);
@@ -167,29 +160,19 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
       totalGrossCoupons += cValP;
       totalTaxVal += taxValP;
       cumulativeAccum += netCValP;
-      portCashFlows.push(cValP);
-      netPortCashFlows.push(netCValP);
-      portCfDates.push(event.date);
       portChartData.push({ date: event.date.toISOString().split('T')[0], amount: netCValP, cumulative: cumulativeAccum, overpayment: totalOverpaymentVal, flow: netCValP, type: 'COUPON', gross: cValP, tax: taxValP });
     } else if (event.type === 'amortization') {
       const aVal = event.value;
       currentNominal -= event.value;
-      ytmCumulativeAccum += aVal;
       cashFlows.push(aVal);
       netCashFlows.push(aVal);
       cfDates.push(event.date);
 
       const aValP = event.value * bondCountVal;
       cumulativeAccum += aValP;
-      portCashFlows.push(aValP);
-      netPortCashFlows.push(aValP);
-      portCfDates.push(event.date);
       portChartData.push({ date: event.date.toISOString().split('T')[0], amount: aValP, cumulative: cumulativeAccum, overpayment: totalOverpaymentVal, flow: aValP, type: 'AMORTIZATION', gross: aValP, tax: 0 });
     }
 
-    if (!ytmPaybackDate && ytmCumulativeAccum >= ytmTotalOverpaymentVal) {
-      ytmPaybackDate = event.date.toISOString().split('T')[0];
-    }
     if (!paybackDateVal && cumulativeAccum >= totalOverpaymentVal) {
       paybackDateVal = event.date.toISOString().split('T')[0];
     }
@@ -200,11 +183,7 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   cashFlows.push(finalNominalPayout);
   netCashFlows.push(finalNominalPayout);
   cfDates.push(maturity);
-  ytmCumulativeAccum += finalNominalPayout;
 
-  portCashFlows.push(finalNominalPayoutP);
-  netPortCashFlows.push(finalNominalPayoutP);
-  portCfDates.push(maturity);
   cumulativeAccum += finalNominalPayoutP;
   portChartData.push({
     date: maturity.toISOString().split('T')[0],
@@ -217,9 +196,6 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
     tax: 0
   });
 
-  if (!ytmPaybackDate && ytmCumulativeAccum >= ytmTotalOverpaymentVal) {
-    ytmPaybackDate = maturity.toISOString().split('T')[0];
-  }
   if (!paybackDateVal && cumulativeAccum >= totalOverpaymentVal) {
     paybackDateVal = maturity.toISOString().split('T')[0];
   }
@@ -237,7 +213,7 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   const firstCoupon = events.find(e => e.type === 'coupon')?.value ?? (nominal * (couponRate / 100) / couponFreqVal);
   const netCouponPerPeriod = firstCoupon * (1 - (taxRate / 100));
   const annualNetCoupon = netCouponPerPeriod * couponFreqVal * bondCountVal;
-  const paybackMonthsVal = !paybackDateVal ? -1 : (totalOverpaymentVal <= 0 ? 0 : (annualNetCoupon > 0 ? (totalOverpaymentVal / (annualNetCoupon / 12)) : 0));
+  const paybackMonthsVal = !paybackDateVal ? null : (totalOverpaymentVal <= 0 ? 0 : (annualNetCoupon > 0 ? (totalOverpaymentVal / (annualNetCoupon / 12)) : getDaysBetween(purchase, new Date(paybackDateVal)) / 30.44));
 
   return {
     cleanPrice: cleanPriceVal,
@@ -266,7 +242,6 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
     capitalGain: capitalGainVal,
     grossCouponTotal: totalGrossCoupons,
     isFloatingCoupon: isFloater,
-    knownCouponsOnly: false,
     cashFlows: portChartData
   };
 }

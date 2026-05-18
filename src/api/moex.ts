@@ -36,7 +36,8 @@ export async function fetchBondBoards(secId: string): Promise<string[]> {
   const json = await resp.json();
   if (!json.boards?.data || !json.boards?.columns) return [];
   const colIdx = json.boards.columns.indexOf('boardid');
-  return json.boards.data.map((row: unknown[]) => String(row[colIdx]));
+  if (colIdx === -1) return [];
+  return json.boards.data.map((row: unknown[]) => String(row[colIdx] ?? ''));
 }
 
 export async function fetchBondDetails(
@@ -69,9 +70,9 @@ export async function fetchBondization(
   const coupons = json.coupons?.data && json.coupons?.columns
     ? rowsToObjects(json.coupons.data, json.coupons.columns).map(c => ({
         ...c,
-        value: Number(c.value),
-        coupondate: String(c.coupondate)
-      }))
+        value: c.value != null ? Number(c.value) : 0,
+        coupondate: c.coupondate != null ? String(c.coupondate) : ''
+      })).filter(c => c.coupondate !== '')
     : [];
 
   return { amortizations, coupons };

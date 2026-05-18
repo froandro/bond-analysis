@@ -11,8 +11,7 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
-server: {
-      host: '0.0.0.0',
+    server: {
       port: 3000,
       hmr: process.env.DISABLE_HMR !== 'true',
     },

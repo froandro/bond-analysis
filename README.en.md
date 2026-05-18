@@ -13,8 +13,8 @@ You buy a bond and want to know its real return — not just the coupon bid/ask,
 - **Net Yield** — same as YTM, but after tax
 - **Payback period** — when coupons cover the premium over par
 - **Total profit** over the bond's lifetime
-- **Cash flow chart** — month by month
-- **Detailed payment schedule** — every single payment
+- **Cash flow chart** — time-based x-axis aligned to events (coupon, offer, call, put, payback)
+- **Detailed payment schedule** — every single payment with offer/call/put/payback rows
 - **Bond comparison** — add multiple bonds and compare metrics side by side
 
 ## Screenshots
