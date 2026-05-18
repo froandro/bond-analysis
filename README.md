@@ -171,9 +171,23 @@ npm run dev
 
 Открой в браузере http://localhost:3000.
 
+## Тестирование
+
+```bash
+npm test          # однократно
+npm run test:watch  # в режиме watch
+```
+
+Написаны тесты для ключевой логики:
+
+- **YTM / Net Yield** — точность bisection, учёт комиссии, NaN-кейсы
+- **computeResults** — полный пайплайн: норма, премия, амортизация, флоатер, ошибки
+- **isFloatingCoupon** — детекция по MOEX-полям, имени, вариативности купонов
+- **Вспомогательные функции** — normalizeCurrency, getDaysBetween, clamp, getDefaultInvestment
+
 ## Технологии
 
-React 19 · TypeScript · Vite · Tailwind CSS 4 · Recharts · Zod · MOEX ISS API · CBR API
+React 19 · TypeScript · Vite · Tailwind CSS 4 · Recharts · Zod · MOEX ISS API · CBR API · Vitest
 
 ## Лицензия
 
