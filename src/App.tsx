@@ -286,6 +286,16 @@ export default function App() {
     window.print();
   }, [results]);
 
+  const chartTheme = {
+    tick: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)',
+    tickSec: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.35)',
+    tooltipBg: isDark ? '#161618' : '#fff',
+    tooltipBorder: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+    tooltipText: isDark ? '#fff' : '#1a1a1c',
+    tooltipShadow: isDark ? '0 10px 30px rgba(0,0,0,0.4)' : '0 10px 30px rgba(0,0,0,0.1)',
+    gridStroke: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.06)',
+  };
+
   return (
     <>
     <div id="screen-app" className={`min-h-screen flex flex-col font-sans overflow-x-hidden ${isDark ? 'dark' : ''}`} style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
@@ -732,7 +742,7 @@ export default function App() {
                         ticks={chartTicks}
                         axisLine={false} 
                         tickLine={false} 
-                        tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.4)' }}
+                        tick={{ fontSize: 10, fill: chartTheme.tick }}
                         tickFormatter={(val) => {
                           const d = new Date(val);
                           return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -740,11 +750,21 @@ export default function App() {
                         dy={10}
                         height={40}
                       />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={chartTheme.gridStroke} />
                       <YAxis 
                         yId="left"
                         axisLine={false} 
                         tickLine={false} 
-                        tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)' }}
+                        tick={{ fontSize: 10, fill: chartTheme.tickSec }}
+                        tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`}
+                        width={45}
+                      />
+                      <YAxis 
+                        yId="right"
+                        orientation="right"
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fontSize: 10, fill: chartTheme.tickSec }}
                         tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`}
                         width={45}
                       />
@@ -757,8 +777,8 @@ export default function App() {
                         tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`}
                       />
                       <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#161618', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', boxShadow: '0 10px 30px rgba(0,0,0,0.4)', color: '#fff', padding: '12px' }}
-                        itemStyle={{ padding: '4px 0', color: '#fff', fontSize: '11px' }}
+                        contentStyle={{ backgroundColor: chartTheme.tooltipBg, border: `1px solid ${chartTheme.tooltipBorder}`, borderRadius: '12px', fontSize: '11px', boxShadow: chartTheme.tooltipShadow, color: chartTheme.tooltipText, padding: '12px' }}
+                        itemStyle={{ padding: '4px 0', color: chartTheme.tooltipText, fontSize: '11px' }}
                         labelStyle={{ color: '#f97316', fontWeight: 'bold', fontSize: '12px', marginBottom: '8px' }}
                         labelFormatter={(ts: number) => {
                           const d = new Date(ts);
@@ -809,6 +829,7 @@ export default function App() {
                           label={{ 
                             value: 'ОФЕРТА', 
                             position: 'top', 
+                            dy: 20,
                             fill: '#a855f7', 
                             fontSize: 9, 
                             fontWeight: 'bold' 
@@ -824,6 +845,7 @@ export default function App() {
                           label={{ 
                             value: 'КОЛЛ', 
                             position: 'top', 
+                            dy: 40,
                             fill: '#3b82f6', 
                             fontSize: 9, 
                             fontWeight: 'bold' 
@@ -839,6 +861,7 @@ export default function App() {
                           label={{ 
                             value: 'ПУТ', 
                             position: 'top', 
+                            dy: 60,
                             fill: '#22c55e', 
                             fontSize: 9, 
                             fontWeight: 'bold' 
@@ -879,7 +902,7 @@ export default function App() {
                           return null;
                         }}
                       />
-                      <ReferenceLine yId="left" y={0} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+                      <ReferenceLine yId="left" y={0} stroke={isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.08)'} strokeWidth={1} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
