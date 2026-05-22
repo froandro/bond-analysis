@@ -195,13 +195,6 @@ export default function App() {
       }
       setCurrency(newCurrency);
 
-      const secIdUpper = (secId || '').toUpperCase();
-      if (secIdUpper.startsWith('SU') || fullBond.BONDSUBTYPE === 'GOVERNMENT') {
-        setTaxRate(prev => prev !== 0 ? 0 : prev);
-      } else {
-        setTaxRate(prev => prev === 0 ? 13 : prev);
-      }
-
     } catch (e) {
       console.error('Selection error:', e);
       setNotification('Данные не найдены или облигация не торгуется.');
