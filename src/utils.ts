@@ -98,11 +98,13 @@ export function isFloatingCoupon(
 ): boolean {
   if (!bondType && !bondSubType && !couponType && !shortName) return false;
 
-  const t = (bondType || bondSubType || couponType || '').toUpperCase();
-
-  // MOEX type fields explicitly indicate floating
-  if (t.includes('FLOAT') || t.includes('VARIABLE') || t.includes('CPI') || t.includes('INDEX') ||
-      t.includes('\u041F\u041B\u0410\u0412') || t.includes('\u041F\u0415\u0420\u0415\u041C')) return true;
+  // Check each type field individually — MOEX may put the type marker in any of them
+  for (const field of [bondType, bondSubType, couponType]) {
+    const val = (field || '').toUpperCase();
+    if (val.includes('FLOAT') || val.includes('VARIABLE') || val.includes('CPI') || val.includes('INDEX') ||
+        val.includes('\u041F\u041B\u0410\u0412') || val.includes('\u041F\u0415\u0420\u0415\u041C') ||
+        val.includes('\u0424\u041B\u041E\u0410\u0422')) return true;
+  }
 
   // MOEX type fields exist but don't indicate floating — trust MOEX classification
   if (bondType || bondSubType || couponType) return false;

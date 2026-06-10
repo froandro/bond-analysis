@@ -411,7 +411,7 @@ export default function App() {
                     ))}
                   </div>
                 )}
-                {!isLoading && bondSearch.length >= 3 && searchResults.length === 0 && (
+                {!isLoading && bondSearch.length >= 3 && searchResults.length === 0 && !selectedBond && (
                   <div className="absolute top-full left-0 right-0 mt-2 rounded-xl shadow-xl z-50 p-6 text-center text-[11px] font-bold" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', color: 'var(--text-muted)' }}>
                     Ничего не найдено
                   </div>
@@ -632,7 +632,7 @@ export default function App() {
                             {isFloatingCoupon(selectedBond.BONDTYPE, selectedBond.BONDSUBTYPE, selectedBond.COUPONTYPE, selectedBond.SHORTNAME, selectedBond.coupons) && (
                               <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-bold" style={{ backgroundColor: 'rgba(234,179,8,0.1)', color: '#eab308' }}>
                                 <Info size={12} />
-                                Плавающий купон — текущая ставка может измениться. Расчёт приблизительный.
+                                Плавающий купон — текущая ставка может измениться. Расчёт приблизительный. ~ по последнему купону
                               </div>
                             )}
                           </div>
@@ -651,12 +651,7 @@ export default function App() {
                     <div className="flex items-baseline gap-2 leading-none" style={{ color: 'var(--text-primary)' }}>
                       <span className="text-[100px] lg:text-[180px] font-black tracking-tighter">{results.netYield.toFixed(2)}</span>
                       <span className="text-4xl lg:text-7xl font-light" style={{ color: 'var(--text-muted)' }}>%</span>
-                      <span className="ml-4 px-3 py-1.5 bg-orange-500/10 text-orange-500 rounded text-[10px] font-bold border border-orange-500/20 uppercase tracking-widest">NET APR</span>
-                      {results.isFloatingCoupon && (
-                        <span className="ml-2 px-2 py-1 text-[10px] font-bold rounded" style={{ backgroundColor: 'rgba(234,179,8,0.1)', color: '#eab308' }}>
-                          ~ по последнему купону
-                        </span>
-                      )}
+                      <span className="px-3 py-1.5 bg-orange-500/10 text-orange-500 rounded text-[10px] font-bold border border-orange-500/20 uppercase tracking-widest">NET APR</span>
                     </div>
                   </div>
                   

@@ -70,22 +70,32 @@ export function computeResults(bond: BondData | null, params: CalcParams): Resul
   if (bond?.coupons && bond.coupons.length > 0) {
     bond.coupons.forEach(c => {
       const d = new Date(String(c.coupondate));
-      if (d > purchase && d <= maturity) {
-        events.push({ date: d, type: 'coupon', value: Number(c.value) });
+      const v = Number(c.value);
+      if (d > purchase && d <= maturity && v > 0) {
+        events.push({ date: d, type: 'coupon', value: v });
       }
     });
 
-    const lastKnownCouponDate = new Date(Math.max(...bond.coupons.map(c => new Date(String(c.coupondate)).getTime())));
+    const knownCoupons = bond.coupons.filter(c => Number(c.value) > 0);
+    const lastKnownCouponDate = knownCoupons.length > 0
+      ? new Date(Math.max(...knownCoupons.map(c => new Date(String(c.coupondate)).getTime())))
+      : new Date(Math.max(...bond.coupons.map(c => new Date(String(c.coupondate)).getTime())));
+
     if (lastKnownCouponDate < maturity) {
-      const knownCoupons = bond.coupons.filter(c => Number(c.value) > 0);
       const lastCouponValue = knownCoupons.length > 0 ? Number(knownCoupons[knownCoupons.length - 1].value) : 0;
+      let lastCouponRate = 0;
+      if (isFloater && lastCouponValue > 0) {
+        const paidBeforeLast = amortSchedule.filter(a => a.date < lastKnownCouponDate).reduce((sum, a) => sum + a.value, 0);
+        const nominalAtLast = Math.max(0, nominal - paidBeforeLast);
+        lastCouponRate = nominalAtLast > 0 ? lastCouponValue / nominalAtLast : 0;
+      }
       let currentNext = new Date(lastKnownCouponDate);
       currentNext.setDate(currentNext.getDate() + couponPeriodDays);
       let safety = 0;
       while (currentNext <= maturity && safety < 100) {
         const paidAmort = amortSchedule.filter(a => a.date < currentNext).reduce((sum, a) => sum + a.value, 0);
         const nominalAtDate = Math.max(0, nominal - paidAmort);
-        const cVal = isFloater && lastCouponValue > 0 ? lastCouponValue : nominalAtDate * (couponRate / 100) / couponFreqVal;
+        const cVal = isFloater && lastCouponRate > 0 ? nominalAtDate * lastCouponRate : nominalAtDate * (couponRate / 100) / couponFreqVal;
         events.push({ date: new Date(currentNext), type: 'coupon', value: cVal });
         currentNext.setDate(currentNext.getDate() + couponPeriodDays);
         safety++;

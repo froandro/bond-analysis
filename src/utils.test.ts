@@ -51,6 +51,8 @@ describe('isFloatingCoupon', () => {
   it('detects floating from Russian keywords', () => {
     expect(isFloatingCoupon('ПЛАВ')).toBe(true);
     expect(isFloatingCoupon('ПЕРЕМ')).toBe(true);
+    expect(isFloatingCoupon('Флоатер')).toBe(true);
+    expect(isFloatingCoupon('ФЛОАТЕР')).toBe(true);
   });
 
   it('detects floating from name with Russian prefix', () => {
