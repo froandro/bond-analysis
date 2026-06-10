@@ -16,6 +16,7 @@ You buy a bond and want to know its real return — not just the coupon bid/ask,
 - **Cash flow chart** — time-based x-axis aligned to events (coupon, offer, call, put, payback)
 - **Detailed payment schedule** — every single payment with offer/call/put/payback rows
 - **Bond comparison** — add multiple bonds and compare metrics side by side
+- **Floating-rate bonds** — automatically detected; approximate calculation based on the last known coupon
 
 ## Screenshots
 
