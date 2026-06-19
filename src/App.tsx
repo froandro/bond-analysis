@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import {
   Search,
   Download,
@@ -1258,6 +1259,7 @@ export default function App() {
             );
           })()}
         </div>
+        <Analytics />
     </>
   );
 }
